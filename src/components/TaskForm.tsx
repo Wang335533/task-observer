@@ -4,7 +4,7 @@ import { Dialog } from './ui/dialog'
 import { Button } from './ui/button'
 import type { TaskConfig } from '../lib/types'
 import { rpc } from '../lib/bridge'
-const blank: TaskConfig = { id: '', name: '', description: '', adapter: 'json', project: '', match_kind: 'script', entry: '', subcommands: [], snapshot: '', logs: '', python: '', interval: 30 }
+const blank: TaskConfig = { id: '', name: '', description: '', adapter: 'json', project: '', match_kind: 'script', entry: '', subcommands: [], snapshot: '', logs: '', python: '', interval: 300 }
 export function TaskForm({ initial, onClose, onSaved }: { initial?: TaskConfig; onClose: () => void; onSaved: (task: TaskConfig) => void }) {
   const [task, setTask] = useState<TaskConfig>(initial || blank)
   const [commands, setCommands] = useState(task.subcommands.join(', '))

@@ -7,7 +7,7 @@ export async function mockCollector(page: Page, empty = false, allAdapters = fal
   const tasks: Task[] = ['grok', 'tieba'].map((id, index) => ({
     config: { id, name: index ? '贴吧抓取' : 'Grok 抓取', description: '演示数据 · 非真实运行记录',
       adapter: id as 'grok' | 'tieba', project: `C:\\demo\\${id}`, match_kind: 'module',
-      entry: `${id}spider`, subcommands: ['run'], snapshot: '', logs: '', python: '', interval: 60 },
+      entry: `${id}spider`, subcommands: ['run'], snapshot: '', logs: '', python: '', interval: 300 },
     snapshot: { metrics: [
       { key: 'posts', label: '帖子', value: index ? 2400 : 1200, unit: '' },
       { key: 'comments', label: '评论', value: index ? 9600 : 4800, unit: '' },
@@ -23,7 +23,7 @@ export async function mockCollector(page: Page, empty = false, allAdapters = fal
     const names = { msqa: '微软 QA 抓取', kokusho: '古籍 · 国书数据库', ssrn: 'SSRN PDF 抓取', cnki: '知网文献元数据' }
     for (const adapter of ['msqa', 'kokusho', 'ssrn', 'cnki'] as const) {
       const task = structuredClone(tasks[0])
-      task.config = { ...task.config, id: adapter, name: names[adapter], adapter, interval: adapter === 'cnki' ? 60 : 30 }
+      task.config = { ...task.config, id: adapter, name: names[adapter], adapter, interval: 300 }
       task.snapshot.stage = adapter === 'ssrn' ? '助手在线，下载活动未确认' : '读取业务进展'
       const labels = { msqa: ['完整问题', '回答'], kokusho: ['书目详情', '著作详情'], ssrn: ['已下载 PDF', '待下载'], cnki: ['已完成期刊', '本刊论文（期次汇总）'] }
       task.snapshot.metrics = labels[adapter].map((label, index) => ({ key: `metric-${index}`, label, value: index ? 240 : 120, unit: '' }))

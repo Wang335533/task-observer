@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SCHEMA_VERSION = 1
+REFRESH_SECONDS = 300
+STALE_SECONDS = REFRESH_SECONDS * 3
 
 
 def now_iso():
@@ -60,7 +62,7 @@ def validate_task(value):
     commands = result.get('subcommands', [])
     if not isinstance(commands, list) or any(not isinstance(s, str) or not re.fullmatch(r'[\w-]+', s) for s in commands):
         raise ValueError('子命令请用英文逗号分隔，只包含字母、数字、下划线或连字符')
-    result['interval'] = 60 if result['adapter'] in ('grok', 'cnki') else 30
+    result['interval'] = REFRESH_SECONDS
     if result['adapter'] == 'ssrn':
         port = result.get('helper_port', 18765)
         if not isinstance(port, int) or isinstance(port, bool) or not 1024 <= port <= 65535:

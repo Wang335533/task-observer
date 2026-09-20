@@ -12,7 +12,7 @@ from pathlib import Path
 import psutil
 
 from . import adapters
-from .model import redact, validate_task
+from .model import REFRESH_SECONDS, STALE_SECONDS, redact, validate_task
 from .processes import ProcessSampler
 from .store import Store
 
@@ -32,13 +32,13 @@ def view_state(snapshot, resource, adapter_error, now, adapter):
         or (updated and updated < min(r['created_at'] for r in roots) - 1))
     if not source_current:
         issues = []
-    stale = updated is None or now - updated > 180
+    stale = updated is None or now - updated > STALE_SECONDS
     if adapter_error:
         issues.append(dict(code='collector_error', level='collector', message=adapter_error))
     elif running and stale and updated is not None and adapter != 'process':
-        issues.append(dict(code='stale', level='collector', message='进度快照超过 3 分钟未更新'))
-    if running and source_current and snapshot.get('heartbeat_at') and now - snapshot['heartbeat_at'] > 180:
-        issues.append(dict(code='heartbeat', level='attention', message='进程仍在运行，但任务心跳已超过 3 分钟未更新'))
+        issues.append(dict(code='stale', level='collector', message='进度快照超过 15 分钟未更新'))
+    if running and source_current and snapshot.get('heartbeat_at') and now - snapshot['heartbeat_at'] > STALE_SECONDS:
+        issues.append(dict(code='heartbeat', level='attention', message='进程仍在运行，但任务心跳已超过 15 分钟未更新'))
     status = snapshot.get('status', 'unknown')
     if running:
         run_state = 'service_online' if adapter == 'ssrn' else 'running'
@@ -65,6 +65,8 @@ class Service:
         self.sampler = ProcessSampler()
         self.lock = threading.RLock()
         self.stop = threading.Event()
+        self.wake = threading.Event()
+        self.rescan = threading.Event()
         self.pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix='progress')
         self.runtime = {}
         self.pending = {}
@@ -80,30 +82,48 @@ class Service:
 
     def close(self):
         self.stop.set()
+        self.wake.set()
         self.pool.shutdown(wait=False, cancel_futures=True)
 
     def loop(self):
+        next_scan = 0
         while not self.stop.is_set():
-            started = time.monotonic()
+            self.wake.clear()
+            now = time.monotonic()
+            sample_resources = now >= next_scan or self.rescan.is_set()
+            if sample_resources:
+                self.rescan.clear()
+                # Start-to-start cadence. Skip missed cycles after sleep; never replay a burst.
+                next_scan = now + REFRESH_SECONDS
             try:
-                self.tick()
+                changed = self.tick(sample_resources=sample_resources)
                 self.scan_error = None
             except Exception as exc:
                 self.scan_error = redact(str(exc))
-            self.stop.wait(max(.1, 5 - (time.monotonic() - started)))
+                changed = True
+            if changed and not self.stop.is_set():
+                self.emit(dict(type='snapshot_updated', snapshot=self.request('snapshot', {})))
+            self.wake.wait(max(.01, next_scan - time.monotonic()))
 
-    def tick(self):
-        inventory = self.sampler.inventory(self.store.tasks())
+    def tick(self, sample_resources=True):
+        inventory = self.sampler.inventory(self.store.tasks()) if sample_resources else None
         now = time.time()
+        changed = sample_resources
         with self.lock:
             for task in self.store.tasks():
                 task_id = task['id']
                 state = self.runtime.setdefault(task_id, dict(snapshot=adapters.base_snapshot(), resource={'roots': []},
                     error=None, next_check=0, last_sample=0, seen_roots={}, generation=0))
                 pending = self.pending.get(task_id)
+                completed = False
                 if pending and pending[0].done():
                     future, generation = self.pending.pop(task_id)
+                    if generation != state['generation']:
+                        # An edit during an in-flight read must get its first result promptly.
+                        self.rescan.set()
+                        self.wake.set()
                     if generation == state['generation']:
+                        changed = completed = True
                         try:
                             snapshot = future.result()
                             old = state['snapshot']
@@ -129,12 +149,14 @@ class Service:
                             else:
                                 message = redact(str(exc))
                             state['error'] = message[:800]
-                        state['next_check'] = now + task['interval']
                         state['last_checked_at'] = now
-                if task_id not in self.pending and now >= state['next_check']:
-                    self.pending[task_id] = (self.pool.submit(adapters.collect, copy.deepcopy(task)), state['generation'])
-                    state['next_check'] = now + task['interval']
-                resource = self.sampler.collect(task, inventory)
+                if sample_resources and task_id not in self.pending:
+                    future = self.pool.submit(adapters.collect, copy.deepcopy(task))
+                    self.pending[task_id] = (future, state['generation'])
+                    future.add_done_callback(lambda _: self.wake.set())
+                if not sample_resources and not completed:
+                    continue
+                resource = self.sampler.collect(task, inventory) if sample_resources else state['resource']
                 state['resource'] = resource
                 snapshot = state['snapshot']
                 current_roots = {root['identity']: root for root in resource['roots']}
@@ -164,12 +186,14 @@ class Service:
                 for alert in self.store.sync_alerts(task_id, health['issues']):
                     if self.store.setting('notifications'):
                         self.emit(dict(type='notification', title=task['name'], body=alert['message'], alert_id=alert['id']))
-                if now - state['last_sample'] >= 60:
+                if sample_resources:
                     self.store.sample(task_id, resource, snapshot['metrics'])
                     state['last_sample'] = now
-            self.last_scan = now
-            self.own_usage = dict(cpu_percent=round(self.self_process.cpu_percent() / (psutil.cpu_count() or 1), 2),
-                                  memory_bytes=self.self_process.memory_info().rss)
+            if sample_resources:
+                self.last_scan = now
+                self.own_usage = dict(cpu_percent=round(self.self_process.cpu_percent() / (psutil.cpu_count() or 1), 2),
+                                      memory_bytes=self.self_process.memory_info().rss)
+        return changed
 
     def task_views(self):
         views = []
@@ -206,6 +230,8 @@ class Service:
                 self.runtime[task['id']] = dict(snapshot=adapters.base_snapshot(), resource={'roots': []}, error=None,
                     next_check=0, last_sample=0, seen_roots={}, generation=old.get('generation', 0) + 1)
                 self.store.event(task['id'], '已更新关注任务' if task['id'] in exists else '已添加关注任务')
+                self.rescan.set()
+                self.wake.set()
             return task
         if method == 'set_notifications':
             return self.store.setting('notifications', bool(params.get('enabled')))

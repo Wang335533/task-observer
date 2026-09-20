@@ -76,6 +76,7 @@ test('all six adapters open independent pages and show check cadence', async ({ 
   await expect(page.locator('.task-card')).toHaveCount(6)
   await expect(page.getByText('助手在线', { exact: true })).toBeVisible()
   await expect(page.locator('.check-cadence')).toHaveCount(6)
+  await expect(page.locator('.check-cadence').filter({ hasText: '每 5 分钟检查' })).toHaveCount(6)
   for (const name of ['微软 QA 抓取', '古籍 · 国书数据库', 'SSRN PDF 抓取', '知网文献元数据']) {
     await page.getByRole('link', { name: `查看 ${name} 详情` }).click()
     await expect(page.getByRole('heading', { name, exact: true })).toBeVisible()
@@ -86,4 +87,27 @@ test('all six adapters open independent pages and show check cadence', async ({ 
   await page.evaluate(() => window.scrollTo(0, 0))
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0)
   await page.screenshot({ path: 'docs/images/overview.png', fullPage: true })
+})
+
+test('overview and log automatic reads wait five minutes', async ({ page }) => {
+  await page.clock.install()
+  const reads: Record<string, number> = {}
+  page.on('request', request => {
+    if (request.url().endsWith('/__observer')) {
+      const { method } = request.postDataJSON()
+      reads[method] = (reads[method] || 0) + 1
+    }
+  })
+  await page.goto('/')
+  await expect(page.locator('.task-card')).toHaveCount(2)
+  await page.getByRole('link', { name: '查看 Grok 抓取 详情' }).click()
+  await page.getByRole('tab', { name: '运行日志' }).click()
+  await expect(page.locator('.log-content')).toBeVisible()
+  const before = { ...reads }
+  await page.clock.fastForward(299_000)
+  expect(reads.snapshot).toBe(before.snapshot)
+  expect(reads.logs).toBe(before.logs)
+  await page.clock.fastForward(1_000)
+  await expect.poll(() => reads.snapshot).toBe(before.snapshot + 1)
+  await expect.poll(() => reads.logs).toBe(before.logs + 1)
 })

@@ -3,7 +3,7 @@
 use serde_json::{json, Value};
 use std::{collections::HashMap, io::{BufRead, BufReader, Write}, path::PathBuf,
     process::{Child, ChildStdin, Command, Stdio}, sync::{atomic::{AtomicU64, Ordering}, Arc, Mutex}};
-use tauri::{Manager, menu::{Menu, MenuItem}, tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState}};
+use tauri::{Emitter, Manager, menu::{Menu, MenuItem}, tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState}};
 use tauri_plugin_notification::NotificationExt;
 use tokio::sync::oneshot;
 
@@ -103,6 +103,12 @@ fn start_collector(app: &tauri::AppHandle, bridge: Arc<Bridge>) -> Result<(), Bo
                         } else { Ok(message.get("result").cloned().unwrap_or(Value::Null)) };
                         let _ = sender.send(result);
                     }
+                } else if message.get("type").and_then(Value::as_str) == Some("snapshot_updated") {
+                    if let Some(window) = handle.get_webview_window("main") {
+                        if window.is_visible().unwrap_or(false) {
+                            let _ = window.emit("observer-snapshot", &message["snapshot"]);
+                        }
+                    }
                 } else if message.get("type").and_then(Value::as_str) == Some("notification") {
                     let title = message.get("title").and_then(Value::as_str).unwrap_or("任务观测台");
                     let body = message.get("body").and_then(Value::as_str).unwrap_or("有任务需要关注");
@@ -118,7 +124,7 @@ fn start_collector(app: &tauri::AppHandle, bridge: Arc<Bridge>) -> Result<(), Bo
 }
 
 fn show_window(app: &tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") { let _ = window.unminimize(); let _ = window.show(); let _ = window.set_focus(); }
+    if let Some(window) = app.get_webview_window("main") { let _ = window.unminimize(); let _ = window.show(); let _ = window.set_focus(); let _ = window.emit("observer-visible", true); }
 }
 
 fn main() {

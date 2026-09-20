@@ -135,7 +135,7 @@ def test_health_separate_from_process_and_no_cpu_guess():
 
 def test_stale_and_collector_errors_are_not_task_failures():
     snapshot = adapters.base_snapshot() | {'updated_at': 1000, 'status': 'running'}
-    state = view_state(snapshot, {'roots': [{'pid': 1, 'created_at': 1}]}, None, 1400, 'tieba')
+    state = view_state(snapshot, {'roots': [{'pid': 1, 'created_at': 1}]}, None, 2000, 'tieba')
     assert state['issues'][0]['level'] == 'collector' and state['run_state'] == 'running'
     state = view_state(snapshot, {'roots': []}, 'read failed', 1400, 'tieba')
     assert state['run_state'] == 'unknown_end'

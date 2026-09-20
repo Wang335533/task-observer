@@ -6,7 +6,7 @@ import threading
 import time
 from pathlib import Path
 
-from .model import default_tasks, redact
+from .model import REFRESH_SECONDS, default_tasks, redact
 
 
 class Store:
@@ -37,6 +37,13 @@ class Store:
                         self.db.execute('INSERT OR IGNORE INTO tasks VALUES(?,?)', (task['id'], json.dumps(task, ensure_ascii=False)))
                 self.db.execute("INSERT INTO settings VALUES('initialized','true')")
                 self.db.execute("INSERT INTO settings VALUES('notifications','true')")
+            # Migrate only our configuration; no business files are changed.
+            for row in self.db.execute('SELECT id,config FROM tasks').fetchall():
+                config = json.loads(row['config'])
+                if 'interval' in config and config['interval'] != REFRESH_SECONDS:
+                    config['interval'] = REFRESH_SECONDS
+                    self.db.execute('UPDATE tasks SET config=? WHERE id=?',
+                                    (json.dumps(config, ensure_ascii=False), row['id']))
             self.db.commit()
 
     def tasks(self):

@@ -87,4 +87,4 @@ def test_new_adapter_config_paths_and_loopback_port(tmp_path):
     with pytest.raises(ValueError): validate_task(task | {'helper_port': 'https://example.com'})
     with pytest.raises(ValueError): validate_task(task | {'helper_port': 80})
     with pytest.raises(ValueError): validate_task(task | {'adapter': 'cnki'})
-    assert validate_task(task | {'adapter': 'cnki', 'snapshot': str(tmp_path / 'state.sqlite')})['interval'] == 60
+    assert validate_task(task | {'adapter': 'cnki', 'snapshot': str(tmp_path / 'state.sqlite')})['interval'] == 300

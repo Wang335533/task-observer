@@ -20,6 +20,7 @@ function previewBridge(): Plugin {
       createInterface({ input: child.stdout }).on('line', line => {
         try {
           const message = JSON.parse(line)
+          if (message.type === 'snapshot_updated') server.ws.send('observer:snapshot', message.snapshot)
           const request = pending.get(message.id)
           if (request) { pending.delete(message.id); message.error ? request.reject(new Error(message.error)) : request.resolve(message.result) }
         } catch { /* Non-protocol output is never rendered. */ }
