@@ -1,0 +1,32 @@
+import type { Page } from '@playwright/test'
+import type { Snapshot, Task } from '../../src/lib/types'
+
+// Synthetic fixtures only. Never read personal tasks or running collectors.
+export async function mockCollector(page: Page, empty = false) {
+  const now = Date.now() / 1000
+  const tasks: Task[] = ['grok', 'tieba'].map((id, index) => ({
+    config: { id, name: index ? '贴吧抓取' : 'Grok 抓取', description: '演示数据 · 非真实运行记录',
+      adapter: id as 'grok' | 'tieba', project: `C:\\demo\\${id}`, match_kind: 'module',
+      entry: `${id}spider`, subcommands: ['run'], snapshot: '', logs: '', python: '', interval: 60 },
+    snapshot: { metrics: [
+      { key: 'posts', label: '帖子', value: index ? 2400 : 1200, unit: '' },
+      { key: 'comments', label: '评论', value: index ? 9600 : 4800, unit: '' },
+      { key: 'users', label: '用户', value: null, unit: '' }],
+      queues: [], stage: index ? '等待下次运行' : '采集会话', status: index ? 'completed' : 'running',
+      run_id: `demo-${id}`, updated_at: now, statistics_at: now, started_at: now - 3600,
+      finished_at: index ? now - 120 : null, issues: [], completed: null, total: null, current: '', cached: false },
+    resource: { roots: index ? [] : [{ pid: 100, created_at: now - 3600, identity: '100:demo' }],
+      cpu_percent: index ? null : 0.4, memory_bytes: index ? null : 128 * 1024 ** 2, process_count: index ? 0 : 1 },
+    view: { run_state: index ? 'completed' : 'running', health: 'ok', issues: [], stale: false }, checking: false,
+  }))
+  const snapshot: Snapshot = { tasks: empty ? [] : tasks, last_scan: now, scan_error: null,
+    observer: { cpu_percent: 0.1, memory_bytes: 32 * 1024 ** 2 }, settings: { notifications: true },
+    data_dir: 'C:\\demo\\observer-data', alerts: [], events: [] }
+  await page.route('**/__observer', async route => {
+    const { method } = route.request().postDataJSON()
+    const results: Record<string, unknown> = { snapshot, detail: { samples: [], history: [] },
+      history: [], logs: { lines: ['[演示] 正在读取任务进展'], path: '', message: '' } }
+    if (!(method in results)) throw new Error(`Unmocked RPC: ${method}`)
+    await route.fulfill({ json: { result: results[method] } })
+  })
+}

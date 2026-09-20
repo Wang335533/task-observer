@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "任务观测台",
+  "version": "0.1.1",
+  "identifier": "local.taskobserver.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [],
+    "security": {"csp":"default-src 'self'; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src ipc: http://ipc.localhost; font-src 'self' data:"}
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "externalBin": ["binaries/task-observer-collector"],
+    "icon": ["icons/icon.ico", "icons/icon.png"],
+    "shortDescription": "只关注你的本地业务任务",
+    "windows": {"nsis":{"languages":["SimpChinese"],"displayLanguageSelector":false,"installMode":"currentUser"}}
+  }
+}
