@@ -110,7 +110,7 @@ class Service:
         inventory = self.sampler.inventory(self.store.tasks()) if sample_resources else None
         now = time.time()
         changed = sample_resources
-        with self.lock:
+        with self.lock, self.store.batch():
             for task in self.store.tasks():
                 task_id = task['id']
                 if task_id not in self.runtime:
@@ -258,9 +258,13 @@ class Service:
                 raise ValueError('关注任务不存在')
             if method == 'logs':
                 return adapters.read_log(task)
-            rows = self.store.query('SELECT at,cpu,memory,metrics FROM samples WHERE task_id=? AND at>=? ORDER BY at',
-                                    (task_id, time.time() - 24 * 3600))
-            for row in rows:
-                row['metrics'] = json.loads(row['metrics'])
-            return dict(samples=rows, history=self.request('history', {'task_id': task_id}))
+            section = params.get('section', 'all')
+            if section not in ('all', 'overview', 'resources', 'history'):
+                raise ValueError('不支持的详情页签')
+            rows = []
+            if section in ('all', 'resources'):
+                rows = self.store.query('SELECT at,cpu,memory FROM samples WHERE task_id=? AND at>=? ORDER BY at',
+                                        (task_id, time.time() - 24 * 3600))
+            history = self.request('history', {'task_id': task_id}) if section in ('all', 'history') else []
+            return dict(samples=rows, history=history)
         raise ValueError('不支持的操作')

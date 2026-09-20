@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Activity, ArrowDownLeft, ArrowLeft, ArrowRight, Bell, BookOpen, Check, ChevronRight, Clock3, Cpu, Database, FileText, Folder, History, LayoutGrid, Link2, LoaderCircle, MemoryStick, MessageSquare, Plus, Search, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, TriangleAlert, WifiOff } from 'lucide-react'
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Button } from './components/ui/button'
 import { TaskForm } from './components/TaskForm'
 import { autostart, isDesktop, REFRESH_MS, rpc, subscribeSnapshot } from './lib/bridge'
@@ -37,10 +36,7 @@ function HistoryTable({ runs, names }: { runs: Run[]; names: Record<string, stri
   return <div className="table-wrap"><table><thead><tr><th>任务</th><th>开始时间</th><th>时长</th><th>运行结果</th></tr></thead><tbody>{runs.map(run => <tr key={run.id}><td><strong>{names[run.task_id] || run.task_id}</strong><small className="run-id">{run.id.split(':').slice(1).join(':')}</small></td><td>{date(run.started)}</td><td>{run.ended || run.status === 'running' ? duration(run.started, run.ended || undefined) : '—'}</td><td><span className={`badge ${run.status === 'running' || run.status === 'completed' ? 'green' : 'neutral'}`}>{states[run.status] || run.status}</span></td></tr>)}</tbody></table></div>
 }
 
-function Trend({ samples, field, title, unit }: { samples: Sample[]; field: 'cpu' | 'memory'; title: string; unit: string }) {
-  const values = samples.map(s => ({ at: new Date(s.at * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }), value: field === 'cpu' ? s.cpu : s.memory == null ? null : Math.round(s.memory / 1024 ** 2) }))
-  return <section className="panel chart-panel"><div className="panel-title"><h3>{title}</h3><span>最近 24 小时 · 每 5 分钟采样</span></div>{samples.length < 2 ? <Empty title="正在积累趋势" text="至少两次采样后显示曲线；缺失读数不会补成零。" /> : <div className="chart"><ResponsiveContainer width="100%" height="100%"><AreaChart data={values}><defs><linearGradient id={`fill-${field}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#11989d" stopOpacity={.18} /><stop offset="100%" stopColor="#11989d" stopOpacity={0} /></linearGradient></defs><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#e8edef" /><XAxis dataKey="at" minTickGap={70} axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#89929e' }} /><YAxis width={45} axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#89929e' }} /><Tooltip formatter={v => [`${number(Number(v))} ${unit}`, title]} contentStyle={{ borderRadius: 10, border: '1px solid #e4e9eb' }} /><Area type="monotone" dataKey="value" stroke="#0b8d93" fill={`url(#fill-${field})`} strokeWidth={2} connectNulls={false} isAnimationActive={false} /></AreaChart></ResponsiveContainer></div>}</section>
-}
+const Trend = lazy(() => import('./components/Trend'))
 
 function Detail({ task, back, edit, names }: { task: Task; back: () => void; edit: () => void; names: Record<string, string> }) {
   const [tab, setTab] = useState('overview')
@@ -48,20 +44,29 @@ function Detail({ task, back, edit, names }: { task: Task; back: () => void; edi
   const [logs, setLogs] = useState<{ lines: string[]; path: string; message: string } | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const requestGeneration = useRef(0)
   const refresh = useCallback(async () => {
+    if (tab === 'overview') return
+    const generation = ++requestGeneration.current
     setLoading(true)
     try {
-      if (tab === 'logs') setLogs(await rpc('logs', { task_id: task.config.id }))
-      else setDetail(await rpc('detail', { task_id: task.config.id }))
-      setError('')
-    } catch (e) { setError(String(e)) } finally { setLoading(false) }
+      if (tab === 'logs') {
+        const result = await rpc<{ lines: string[]; path: string; message: string }>('logs', { task_id: task.config.id })
+        if (generation === requestGeneration.current) setLogs(result)
+      } else {
+        const result = await rpc<{ samples: Sample[]; history: Run[] }>('detail', { task_id: task.config.id, section: tab })
+        if (generation === requestGeneration.current) setDetail(result)
+      }
+      if (generation === requestGeneration.current) setError('')
+    } catch (e) { if (generation === requestGeneration.current) setError(String(e)) }
+    finally { if (generation === requestGeneration.current) setLoading(false) }
   }, [task.config.id, tab])
   useEffect(() => {
     void refresh()
     const timer = setInterval(() => { if (!document.hidden) void refresh() }, REFRESH_MS)
     const visible = () => { if (!document.hidden) void refresh() }
     document.addEventListener('visibilitychange', visible)
-    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', visible) }
+    return () => { ++requestGeneration.current; clearInterval(timer); document.removeEventListener('visibilitychange', visible) }
   }, [refresh])
   return <>
     <button className="back-link" onClick={back}><ArrowLeft size={16} />返回任务总览</button>
@@ -81,7 +86,7 @@ function Detail({ task, back, edit, names }: { task: Task; back: () => void; edi
         </section>
       </>}
       {tab === 'logs' && <section className="panel log-panel"><div className="panel-title"><div><h3>最近日志</h3><span className="log-path">{logs?.path || '按需读取，不复制完整日志'}</span></div><Button variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>{loading && <LoaderCircle size={14} className="spin" />}刷新</Button></div>{logs?.lines.length ? <pre className="log-content">{logs.lines.join('\n')}</pre> : <Empty title={loading ? '正在读取日志' : '暂无可显示的日志'} text={logs?.message || '仅读取最近 200 行，最多 128 KB。'} />}<div className="panel-foot">每 5 分钟刷新 · 最多展示最近 200 行 · 常见凭据字段自动隐藏</div></section>}
-      {tab === 'resources' && <div className="charts"><Trend samples={detail.samples} field="cpu" title="CPU 使用率" unit="%" /><Trend samples={detail.samples} field="memory" title="内存工作集" unit="MB" /><p className="muted">仅汇总此任务及其子进程。GPU 指标可由任务的通用状态文件提供，不将整机 GPU 使用率误标成单任务使用率。</p></div>}
+      {tab === 'resources' && <Suspense fallback={<p className="muted">正在加载资源图表…</p>}><div className="charts"><Trend samples={detail.samples} field="cpu" title="CPU 使用率" unit="%" /><Trend samples={detail.samples} field="memory" title="内存工作集" unit="MB" /><p className="muted">仅汇总此任务及其子进程。GPU 指标可由任务的通用状态文件提供，不将整机 GPU 使用率误标成单任务使用率。</p></div></Suspense>}
       {tab === 'history' && <section className="panel"><div className="panel-title padded"><h3>本任务运行历史</h3><span>仅记录实际观察到的运行</span></div><HistoryTable runs={detail.history} names={names} /></section>}
     </div>
   </>
@@ -127,7 +132,7 @@ export default function App() {
   const navigateTask = (id: string) => go(`/task/${id}`)
   const ack = async (alert: Alert) => { try { await rpc('acknowledge', { id: alert.id }); await refresh() } catch (e) { setActionError(String(e)) } }
   return <div className="app-shell">
-    <aside className="sidebar"><a className="brand" href="#/" onClick={e => { e.preventDefault(); go('/') }}><div className="brand-icon"><i /><i /><i /></div><div><strong>任务观测台</strong><span>LOCAL OBSERVER</span></div></a><div className="workspace"><span className="workspace-icon"><Folder size={16} /></span><div><strong>我的工作台</strong><small>本机 · 私有</small></div><span className="workspace-dot" /></div><span className="nav-caption">工作空间</span><nav>{[{ path: '/', label: '任务总览', icon: LayoutGrid }, { path: '/history', label: '运行历史', icon: History }, { path: '/alerts', label: '提醒', icon: Bell }, { path: '/settings', label: '设置', icon: Settings2 }].map(item => <a key={item.path} href={`#${item.path}`} className={(route === item.path || item.path === '/' && route.startsWith('/task/')) ? 'active' : ''} onClick={e => { e.preventDefault(); go(item.path) }}><item.icon size={18} /><span>{item.label}</span>{item.path === '/alerts' && unread > 0 && <b>{unread}</b>}</a>)}</nav><div className="sidebar-bottom"><ShieldCheck size={19} /><strong>数据留在本机</strong><p>只关注你指定的业务任务</p><span>版本 0.1.4</span></div></aside>
+    <aside className="sidebar"><a className="brand" href="#/" onClick={e => { e.preventDefault(); go('/') }}><div className="brand-icon"><i /><i /><i /></div><div><strong>任务观测台</strong><span>LOCAL OBSERVER</span></div></a><div className="workspace"><span className="workspace-icon"><Folder size={16} /></span><div><strong>我的工作台</strong><small>本机 · 私有</small></div><span className="workspace-dot" /></div><span className="nav-caption">工作空间</span><nav>{[{ path: '/', label: '任务总览', icon: LayoutGrid }, { path: '/history', label: '运行历史', icon: History }, { path: '/alerts', label: '提醒', icon: Bell }, { path: '/settings', label: '设置', icon: Settings2 }].map(item => <a key={item.path} href={`#${item.path}`} className={(route === item.path || item.path === '/' && route.startsWith('/task/')) ? 'active' : ''} onClick={e => { e.preventDefault(); go(item.path) }}><item.icon size={18} /><span>{item.label}</span>{item.path === '/alerts' && unread > 0 && <b>{unread}</b>}</a>)}</nav><div className="sidebar-bottom"><ShieldCheck size={19} /><strong>数据留在本机</strong><p>只关注你指定的业务任务</p><span>版本 0.1.5</span></div></aside>
     <div className="main-shell"><div className="topbar"><div className="breadcrumb">工作空间<ChevronRight size={13} /><span>{task ? task.config.name : route === '/history' ? '运行历史' : route === '/alerts' ? '提醒' : route === '/settings' ? '设置' : '任务总览'}</span></div><div className="topbar-right"><span className={`connection ${error || data?.scan_error ? 'offline' : ''}`}><span className="status-dot" />{error || data?.scan_error ? '采集连接异常' : data?.last_scan ? '本地采集已连接' : '正在连接'}</span><button className="icon-button" aria-label="查看提醒" onClick={() => go('/alerts')}><Bell size={18} />{unread > 0 && <i />}</button></div></div>
     <main>
       {(error || data?.scan_error) && <div className="connection-error" role="alert"><WifiOff size={19} /><div><strong>暂时无法更新监控数据</strong><p>{error || data?.scan_error}</p><small>保留上次读数；这不表示业务任务已经失败。</small></div><Button variant="outline" size="sm" onClick={() => void refresh()}>重新检查</Button></div>}

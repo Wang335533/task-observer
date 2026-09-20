@@ -114,3 +114,22 @@ test('overview and log automatic reads wait five minutes', async ({ page }) => {
   await expect.poll(() => reads.snapshot).toBe(before.snapshot + 1)
   await expect.poll(() => reads.logs).toBe(before.logs + 1)
 })
+
+test('detail reads only active tab data', async ({ page }) => {
+  const sections: string[] = []
+  page.on('request', request => {
+    if (request.url().endsWith('/__observer')) {
+      const { method, params } = request.postDataJSON()
+      if (method === 'detail') sections.push(params.section)
+    }
+  })
+  await page.goto('/')
+  await page.getByRole('link', { name: '查看 Grok 抓取 详情' }).click()
+  await expect(page.getByRole('heading', { name: 'Grok 抓取', exact: true })).toBeVisible()
+  expect(sections).toEqual([])
+  await page.getByRole('tab', { name: '资源趋势' }).click()
+  await expect(page.getByRole('heading', { name: 'CPU 使用率' })).toBeVisible()
+  expect(sections).toEqual(['resources'])
+  await page.getByRole('tab', { name: '运行历史' }).click()
+  await expect.poll(() => sections).toEqual(['resources', 'history'])
+})

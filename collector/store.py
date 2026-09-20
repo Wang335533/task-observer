@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 import json
 import hashlib
 import sqlite3
@@ -15,6 +17,7 @@ class Store:
         self.directory = Path(directory)
         self.directory.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
+        self.batch_depth = 0
         self.db = sqlite3.connect(self.directory / 'observer.sqlite3', check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         with self.lock:
@@ -30,6 +33,11 @@ class Store:
               CREATE TABLE IF NOT EXISTS alerts(id INTEGER PRIMARY KEY, task_id TEXT, code TEXT,
                 level TEXT, message TEXT, created REAL, resolved REAL, acknowledged INTEGER DEFAULT 0);
               CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, task_id TEXT, at REAL, message TEXT);
+              CREATE INDEX IF NOT EXISTS runs_task_started ON runs(task_id,started);
+              CREATE INDEX IF NOT EXISTS runs_started ON runs(started);
+              CREATE INDEX IF NOT EXISTS alerts_active ON alerts(task_id,code) WHERE resolved IS NULL;
+              CREATE INDEX IF NOT EXISTS alerts_created ON alerts(created);
+              CREATE INDEX IF NOT EXISTS events_at ON events(at);
               CREATE TABLE IF NOT EXISTS latest_snapshots(task_id TEXT PRIMARY KEY, rule_key TEXT NOT NULL, snapshot TEXT NOT NULL);
             ''')
             initialized = self.db.execute("SELECT value FROM settings WHERE key='initialized'").fetchone()
@@ -46,7 +54,28 @@ class Store:
                     config['interval'] = REFRESH_SECONDS
                     self.db.execute('UPDATE tasks SET config=? WHERE id=?',
                                     (json.dumps(config, ensure_ascii=False), row['id']))
+            self.commit()
+
+    def commit(self):
+        if not self.batch_depth:
             self.db.commit()
+
+    @contextmanager
+    def batch(self):
+        # Readers cannot observe a partially committed collection cycle.
+        with self.lock:
+            self.batch_depth += 1
+            try:
+                yield
+            except BaseException:
+                if self.batch_depth == 1:
+                    self.db.rollback()
+                raise
+            else:
+                if self.batch_depth == 1:
+                    self.db.commit()
+            finally:
+                self.batch_depth -= 1
 
     def tasks(self):
         with self.lock:
@@ -55,20 +84,20 @@ class Store:
     def save_task(self, task):
         with self.lock:
             self.db.execute('INSERT OR REPLACE INTO tasks VALUES(?,?)', (task['id'], json.dumps(task, ensure_ascii=False)))
-            self.db.commit()
+            self.commit()
 
     def setting(self, key, value=None):
         with self.lock:
             if value is not None:
                 self.db.execute('INSERT OR REPLACE INTO settings VALUES(?,?)', (key, json.dumps(value)))
-                self.db.commit()
+                self.commit()
             row = self.db.execute('SELECT value FROM settings WHERE key=?', (key,)).fetchone()
             return json.loads(row[0]) if row else None
 
     def event(self, task_id, message):
         with self.lock:
             self.db.execute('INSERT INTO events(task_id,at,message) VALUES(?,?,?)', (task_id, time.time(), redact(message)))
-            self.db.commit()
+            self.commit()
 
     def sync_alerts(self, task_id, issues):
         created = []
@@ -85,7 +114,7 @@ class Store:
                     cursor = self.db.execute('INSERT INTO alerts(task_id,code,level,message,created) VALUES(?,?,?,?,?)',
                                             (task_id, issue['code'], issue['level'], message, at))
                     created.append(dict(id=cursor.lastrowid, task_id=task_id, created=at, **issue))
-            self.db.commit()
+            self.commit()
         return created
 
     def record_run(self, task_id, identity, started, status, ended=None):
@@ -96,23 +125,23 @@ class Store:
                 return
             self.db.execute('''INSERT INTO runs VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
                 ended=excluded.ended,status=excluded.status''', (key, task_id, started, ended, status, time.time()))
-            self.db.commit()
+            self.commit()
         if not old or old['status'] != status:
             labels = {'running': '开始运行', 'completed': '运行完成', 'failed': '运行失败',
                       'unknown_end': '已结束，结果未确认', 'incomplete': '运行结束，有待处理事项',
                       'observation_gap': '监控已恢复，先前运行结果未知'}
-            self.event(task_id, labels.get(status, status))
+            self.event(task_id, '恢复观察，任务仍在运行' if old and old['status'] == 'observation_gap' and status == 'running' else labels.get(status, status))
 
     def close_interrupted_observations(self):
         with self.lock:
             self.db.execute("UPDATE runs SET status='observation_gap' WHERE status='running'")
-            self.db.commit()
+            self.commit()
 
     def sample(self, task_id, resource, metrics):
         with self.lock:
             self.db.execute('INSERT INTO samples(task_id,at,cpu,memory,metrics) VALUES(?,?,?,?,?)',
                             (task_id, time.time(), resource.get('cpu_percent'), resource.get('memory_bytes'), json.dumps(metrics)))
-            self.db.commit()
+            self.commit()
 
     @staticmethod
     def rule_key(task):
@@ -122,7 +151,7 @@ class Store:
         with self.lock:
             self.db.execute('INSERT OR REPLACE INTO latest_snapshots VALUES(?,?,?)',
                             (task['id'], self.rule_key(task), json.dumps(snapshot, ensure_ascii=False, allow_nan=False)))
-            self.db.commit()
+            self.commit()
 
     def load_snapshot(self, task):
         with self.lock:
@@ -147,4 +176,4 @@ class Store:
     def acknowledge(self, alert_id):
         with self.lock:
             self.db.execute('UPDATE alerts SET acknowledged=1 WHERE id=?', (alert_id,))
-            self.db.commit()
+            self.commit()

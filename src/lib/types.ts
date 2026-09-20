@@ -16,6 +16,6 @@ export type Task = {
 }
 export type Alert = { id: number; task_id: string; code: string; level: string; message: string; created: number; resolved: number | null; acknowledged: number }
 export type Run = { id: string; task_id: string; started: number; ended: number | null; status: string; observed_at: number }
-export type Sample = { at: number; cpu: number | null; memory: number | null; metrics: Metric[] }
+export type Sample = { at: number; cpu: number | null; memory: number | null; metrics?: Metric[] }
 export type Snapshot = { tasks: Task[]; last_scan: number | null; scan_error: string | null; observer: { cpu_percent?: number; memory_bytes?: number };
   settings: { notifications: boolean }; data_dir: string; alerts: Alert[]; events: { id: number; task_id: string; at: number; message: string }[] }

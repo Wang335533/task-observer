@@ -98,14 +98,14 @@ npm run dev
 本地验证：
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests/test_collector.py tests/test_sources.py -q
+.\.venv\Scripts\python.exe -m pytest tests -q
 npm run build
 npm run test:ui
 # 构建采集器后检查打包版本的 stdio 协议
 .\.venv\Scripts\python.exe scripts/smoke_collector.py
 ```
 
-UI 测试使用 Microsoft Edge，自动启动开发服务器并拦截 RPC，完全使用合成数据，不读取用户任务。Python 测试使用临时目录和模拟进程。CI 在 Windows 上运行 Python 测试、前端构建和 UI 测试；桌面安装包需另行执行完整构建。
+UI 测试使用 Microsoft Edge，自动启动开发服务器并拦截 RPC，完全使用合成数据，不读取用户任务。Python 测试使用临时目录和模拟进程。CI 在 Windows 上运行 Python 测试、前端构建、UI 测试、Rust 测试和打包采集器协议测试；完整桌面安装包另行构建。
 
 ## 架构
 
@@ -113,7 +113,7 @@ React 界面通过 `collector_request(method, params)` 请求 Tauri；Rust 将�
 
 接口方法：`snapshot`、`detail`、`logs`、`history`、`save_task`、`set_notifications`、`acknowledge`。没有通用命令执行或业务进程控制接口。
 
-Grok 的现有模块和业务解释器仍由原项目提供，仪表盘不会将它的整个环境打包或复制。模块或字段发生变化时，需要调整对应适配器。
+Grok 的现有只读模块仍由原项目提供，仪表盘不会将它的整个环境打包或复制。模块或字段发生变化时，需要调整对应适配器。
 
 学习参考：Glances 的采集扩展、Beszel 的采集与展示分离、Prefect 的运行记录组织。未嵌入这些项目的运行服务。shadcn/ui 组合组件遵循 Radix Slot / Dialog 与 class-variance-authority 模式。
 
@@ -132,3 +132,10 @@ Grok 的现有模块和业务解释器仍由原项目提供，仪表盘不会将
 关闭窗口后使用 WebView2 TrySuspend 休眠界面，打开时 Resume，保留筛选、页签与滚动位置；后台采集和通知继续。休眠是尽力降低内存，不保证全部释放。最近成功的进度快照保存在本应用数据库中；重启后可恢复带原统计时间的缓存，关注规则变化时不复用旧缓存。
 
 采集器每 5 分钟进行一次轻量健康检查，退出或采样超过 15 分钟未完成时尝试恢复。只关闭本应用持有的采集器标准输入，最多等待 50 秒；未退出则不创建第二个实例。连续恢复最多 3 次，检查间隔退避为 5 / 10 分钟；最后一次启动再给一个检查周期验证，失败后暂停自动恢复、显示错误，并在已启用通知时发送桌面提醒。不会启动、停止或重跑业务抓取。`ui-power.json` 与 `collector-health.json` 各保留一条本地诊断状态。
+
+
+### 性能与维护
+
+首页不加载资源图表库；打开资源页签才加载。详情概览使用已有快照，日志、趋势和历史各自按需请求；切换或离开页签后不再应用旧请求的返回值。资源趋势只查询时间、CPU 和内存，既有业务指标仍保留在数据库中。单轮监控写入合并为短事务，历史和活跃提醒有查询索引；相同运行状态不重复写入。恢复采集器时，同一进程身份记录为“恢复观察”，不伪报新启动。
+
+升级前使用 SQLite backup API 备份本应用数据，并保留上一版安装包及备份用于回滚。当前不自动删除历史、不自动轮换备份，也不清理业务目录。版本验收后可将旧安装包和源码副本、临时测试目录、前端 dist、PyInstaller build 和 Rust target 移入回收站；保留当前版本交付物、源码、当前配置和至少一份可恢复备份。编译工具及开发依赖保留以供后续维护。不要移除正在使用的 SQLite WAL/SHM 或 WebView 数据。
