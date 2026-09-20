@@ -29,6 +29,9 @@ test('watched tasks, separate detail page, tabs and filter preservation', async 
   await page.getByRole('link', { name: '查看 贴吧抓取 详情' }).click()
   await expect(page).toHaveURL(/#\/task\/tieba$/)
   await page.getByRole('button', { name: '返回任务总览' }).click()
+  await expect(page.locator('.task-card')).toHaveCount(2)
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0)
   await page.screenshot({ path: 'docs/images/overview.png', fullPage: true })
   expect(errors).toEqual([])
 })
@@ -64,4 +67,23 @@ test('fresh installation has no invented tasks', async ({ page }) => {
   await expect(page.locator('.task-card')).toHaveCount(0)
   await expect(page.getByText('没有符合条件的任务')).toBeVisible()
   await expect(page.getByRole('button', { name: '添加关注任务' })).toBeVisible()
+})
+
+test('all six adapters open independent pages and show check cadence', async ({ page }) => {
+  await page.unroute('**/__observer')
+  await mockCollector(page, false, true)
+  await page.goto('/')
+  await expect(page.locator('.task-card')).toHaveCount(6)
+  await expect(page.getByText('助手在线', { exact: true })).toBeVisible()
+  await expect(page.locator('.check-cadence')).toHaveCount(6)
+  for (const name of ['微软 QA 抓取', '古籍 · 国书数据库', 'SSRN PDF 抓取', '知网文献元数据']) {
+    await page.getByRole('link', { name: `查看 ${name} 详情` }).click()
+    await expect(page.getByRole('heading', { name, exact: true })).toBeVisible()
+    await expect(page.locator('.task-grid')).toHaveCount(0)
+    await page.getByRole('button', { name: '返回任务总览' }).click()
+    await expect(page.locator('.task-card')).toHaveCount(6)
+  }
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0)
+  await page.screenshot({ path: 'docs/images/overview.png', fullPage: true })
 })

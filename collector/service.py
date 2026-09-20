@@ -41,7 +41,7 @@ def view_state(snapshot, resource, adapter_error, now, adapter):
         issues.append(dict(code='heartbeat', level='attention', message='进程仍在运行，但任务心跳已超过 3 分钟未更新'))
     status = snapshot.get('status', 'unknown')
     if running:
-        run_state = 'running'
+        run_state = 'service_online' if adapter == 'ssrn' else 'running'
     elif status in ('completed', 'success', 'succeeded'):
         run_state = 'completed'
     elif status in ('failed', 'error', 'crashed'):
@@ -124,10 +124,13 @@ class Service:
                                 message = '未找到进度文件或解释器，请检查任务接入设置'
                             elif isinstance(exc, json.JSONDecodeError):
                                 message = '进度文件暂时无法解析，下次检查将自动重试'
+                            elif isinstance(exc, TimeoutError):
+                                message = '进度读取超过时限，暂时保留上次统计'
                             else:
                                 message = redact(str(exc))
                             state['error'] = message[:800]
                         state['next_check'] = now + task['interval']
+                        state['last_checked_at'] = now
                 if task_id not in self.pending and now >= state['next_check']:
                     self.pending[task_id] = (self.pool.submit(adapters.collect, copy.deepcopy(task)), state['generation'])
                     state['next_check'] = now + task['interval']
@@ -179,7 +182,7 @@ class Service:
                 views.append(dict(config=task, snapshot=snapshot,
                                   resource=copy.deepcopy(state.get('resource', {'roots': []})),
                                   view=copy.deepcopy(state.get('view', dict(run_state='idle', health='ok', issues=[], stale=True))),
-                                  checking=task['id'] in self.pending))
+                                  checking=task['id'] in self.pending, last_checked_at=state.get('last_checked_at')))
         return views
 
     def request(self, method, params):

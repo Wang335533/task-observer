@@ -117,6 +117,11 @@ def read_json(path):
 
 
 def collect(task):
+    if task['adapter'] in ('msqa', 'kokusho', 'ssrn', 'cnki'):
+        from .sources import normalize_msqa, collect_kokusho, collect_ssrn, collect_cnki
+        if task['adapter'] == 'msqa':
+            return normalize_msqa(read_json(task['snapshot']))
+        return {'kokusho': collect_kokusho, 'ssrn': collect_ssrn, 'cnki': collect_cnki}[task['adapter']](task)
     if task['adapter'] == 'process':
         result = base_snapshot()
         result.update(stage='进程监控', updated_at=time.time(), note='尚未接入业务进度；仅展示已识别进程的信息。')

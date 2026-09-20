@@ -62,9 +62,24 @@ fn collector_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries/task-observer-collector-x86_64-pc-windows-msvc.exe")
 }
 
+fn data_directory(app: &tauri::AppHandle) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    if let Some(directory) = std::env::var_os("TASK_OBSERVER_DATA_DIR") {
+        return Ok(PathBuf::from(directory));
+    }
+    // Optional machine-local configuration is never included in the repository.
+    let config = std::env::current_exe()?.parent().unwrap().join("observer-local.json");
+    if config.exists() {
+        let value: Value = serde_json::from_slice(&std::fs::read(config)?)?;
+        let directory = value.get("data_dir").and_then(Value::as_str).ok_or("本机配置缺少 data_dir")?;
+        let path = PathBuf::from(directory);
+        if !path.is_absolute() { return Err("本机数据目录必须是绝对路径".into()); }
+        return Ok(path);
+    }
+    Ok(app.path().app_local_data_dir()?)
+}
+
 fn start_collector(app: &tauri::AppHandle, bridge: Arc<Bridge>) -> Result<(), Box<dyn std::error::Error>> {
-    let data_dir = std::env::var_os("TASK_OBSERVER_DATA_DIR").map(PathBuf::from)
-        .unwrap_or(app.path().app_local_data_dir()?);
+    let data_dir = data_directory(app)?;
     std::fs::create_dir_all(&data_dir)?;
     let mut command = Command::new(collector_path());
     command.args(["--data-dir", &data_dir.to_string_lossy()]);
@@ -116,8 +131,7 @@ fn main() {
         .manage(bridge.clone())
         .invoke_handler(tauri::generate_handler![collector_request])
         .setup(move |app| {
-            let directory = std::env::var_os("TASK_OBSERVER_DATA_DIR").map(PathBuf::from)
-                .unwrap_or(app.path().app_local_data_dir()?);
+            let directory = data_directory(app.handle())?;
             tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
                 .title("任务观测台").inner_size(1440.0, 960.0).min_inner_size(780.0, 620.0)
                 .center().data_directory(directory.join("webview"))

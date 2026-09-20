@@ -25,3 +25,4 @@ src-tauri/gen/
 /data/
 /work/
 /outputs/
+observer-local.json

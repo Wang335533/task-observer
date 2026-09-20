@@ -2,7 +2,7 @@ import type { Page } from '@playwright/test'
 import type { Snapshot, Task } from '../../src/lib/types'
 
 // Synthetic fixtures only. Never read personal tasks or running collectors.
-export async function mockCollector(page: Page, empty = false) {
+export async function mockCollector(page: Page, empty = false, allAdapters = false) {
   const now = Date.now() / 1000
   const tasks: Task[] = ['grok', 'tieba'].map((id, index) => ({
     config: { id, name: index ? '贴吧抓取' : 'Grok 抓取', description: '演示数据 · 非真实运行记录',
@@ -17,8 +17,21 @@ export async function mockCollector(page: Page, empty = false) {
       finished_at: index ? now - 120 : null, issues: [], completed: null, total: null, current: '', cached: false },
     resource: { roots: index ? [] : [{ pid: 100, created_at: now - 3600, identity: '100:demo' }],
       cpu_percent: index ? null : 0.4, memory_bytes: index ? null : 128 * 1024 ** 2, process_count: index ? 0 : 1 },
-    view: { run_state: index ? 'completed' : 'running', health: 'ok', issues: [], stale: false }, checking: false,
+    view: { run_state: index ? 'completed' : 'running', health: 'ok', issues: [], stale: false }, checking: false, last_checked_at: now,
   }))
+  if (allAdapters) {
+    const names = { msqa: '微软 QA 抓取', kokusho: '古籍 · 国书数据库', ssrn: 'SSRN PDF 抓取', cnki: '知网文献元数据' }
+    for (const adapter of ['msqa', 'kokusho', 'ssrn', 'cnki'] as const) {
+      const task = structuredClone(tasks[0])
+      task.config = { ...task.config, id: adapter, name: names[adapter], adapter, interval: adapter === 'cnki' ? 60 : 30 }
+      task.snapshot.stage = adapter === 'ssrn' ? '助手在线，下载活动未确认' : '读取业务进展'
+      const labels = { msqa: ['完整问题', '回答'], kokusho: ['书目详情', '著作详情'], ssrn: ['已下载 PDF', '待下载'], cnki: ['已完成期刊', '本刊论文（期次汇总）'] }
+      task.snapshot.metrics = labels[adapter].map((label, index) => ({ key: `metric-${index}`, label, value: index ? 240 : 120, unit: '' }))
+      if (adapter === 'ssrn') task.view.run_state = 'service_online'
+      task.last_checked_at = now
+      tasks.push(task)
+    }
+  }
   const snapshot: Snapshot = { tasks: empty ? [] : tasks, last_scan: now, scan_error: null,
     observer: { cpu_percent: 0.1, memory_bytes: 32 * 1024 ** 2 }, settings: { notifications: true },
     data_dir: 'C:\\demo\\observer-data', alerts: [], events: [] }

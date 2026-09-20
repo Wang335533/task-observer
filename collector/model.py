@@ -40,7 +40,7 @@ def validate_task(value):
         result[key] = result[key].strip()
     if not Path(result['project']).is_absolute():
         raise ValueError('项目位置必须是绝对路径')
-    if result.get('adapter') not in ('grok', 'tieba', 'json', 'process'):
+    if result.get('adapter') not in ('grok', 'tieba', 'json', 'process', 'msqa', 'kokusho', 'ssrn', 'cnki'):
         raise ValueError('未知的进度来源')
     if result.get('match_kind') not in ('script', 'module'):
         raise ValueError('请选择脚本或模块识别方式')
@@ -53,14 +53,19 @@ def validate_task(value):
         result[key] = str(result.get(key, '')).strip()
         if result[key] and not Path(result[key]).is_absolute():
             raise ValueError(f'{key} 必须使用绝对路径')
-    if result['adapter'] in ('json', 'tieba') and not result['snapshot']:
-        raise ValueError('请指定 JSON 状态文件')
+    if result['adapter'] in ('json', 'tieba', 'msqa', 'kokusho', 'cnki') and not result['snapshot']:
+        raise ValueError('请指定进度文件或分片目录')
     if result['adapter'] == 'grok' and not result['python']:
         raise ValueError('请指定 Grok 项目的 Python 解释器')
     commands = result.get('subcommands', [])
     if not isinstance(commands, list) or any(not isinstance(s, str) or not re.fullmatch(r'[\w-]+', s) for s in commands):
         raise ValueError('子命令请用英文逗号分隔，只包含字母、数字、下划线或连字符')
-    result['interval'] = 60 if result['adapter'] == 'grok' else 30
+    result['interval'] = 60 if result['adapter'] in ('grok', 'cnki') else 30
+    if result['adapter'] == 'ssrn':
+        port = result.get('helper_port', 18765)
+        if not isinstance(port, int) or isinstance(port, bool) or not 1024 <= port <= 65535:
+            raise ValueError('本地助手端口必须在 1024～65535 之间')
+        result['helper_port'] = port
     result['description'] = str(result.get('description', ''))[:200]
     return result
 

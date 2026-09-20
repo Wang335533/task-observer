@@ -1,8 +1,8 @@
 export type Metric = { key: string; label: string; value: number | null; unit: string }
 export type TaskConfig = {
-  id: string; name: string; description: string; adapter: 'grok' | 'tieba' | 'json' | 'process';
+  id: string; name: string; description: string; adapter: 'grok' | 'tieba' | 'json' | 'process' | 'msqa' | 'kokusho' | 'ssrn' | 'cnki';
   project: string; match_kind: 'module' | 'script'; entry: string; subcommands: string[];
-  snapshot: string; logs: string; python: string; interval: number;
+  snapshot: string; logs: string; python: string; interval: number; helper_port?: number;
 }
 export type Issue = { code: string; level: string; message: string }
 export type Task = {
@@ -12,7 +12,7 @@ export type Task = {
     issues: Issue[]; completed: number | null; total: number | null; current: string; note?: string; cached: boolean; last_error?: string };
   resource: { roots: { pid: number; created_at: number; identity: string }[]; cpu_percent?: number | null; memory_bytes?: number | null; process_count?: number };
   view: { run_state: string; health: string; issues: Issue[]; stale: boolean; cooldown?: boolean };
-  checking: boolean;
+  checking: boolean; last_checked_at?: number | null;
 }
 export type Alert = { id: number; task_id: string; code: string; level: string; message: string; created: number; resolved: number | null; acknowledged: number }
 export type Run = { id: string; task_id: string; started: number; ended: number | null; status: string; observed_at: number }

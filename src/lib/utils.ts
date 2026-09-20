@@ -14,4 +14,4 @@ export function duration(start: number | null | undefined, end = Date.now() / 10
   const minutes = Math.max(0, Math.floor((end - start) / 60))
   return minutes < 60 ? `${minutes} 分钟` : `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分`
 }
-export const states: Record<string, string> = { running: '运行中', completed: '已完成', failed: '运行失败', incomplete: '有待处理事项', unknown_end: '结果未确认', idle: '未运行', observation_gap: '监控中断，结果未知' }
+export const states: Record<string, string> = { running: '运行中', service_online: '助手在线', completed: '已完成', failed: '运行失败', incomplete: '有待处理事项', unknown_end: '结果未确认', idle: '未运行', observation_gap: '监控中断，结果未知' }
