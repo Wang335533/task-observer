@@ -22,8 +22,13 @@ def view_state(snapshot, resource, adapter_error, now, adapter):
     issues = copy.deepcopy(snapshot.get('issues', []))
     updated = snapshot.get('updated_at')
     roots = resource.get('roots', [])
+    members = resource.get('members', roots)
+    writer = snapshot.get('writer_pid')
+    writer_current = not writer or any(
+        p['pid'] == writer and (updated is None or updated >= p['created_at'] - 1)
+        for p in members)
     source_current = not running or not (
-        (snapshot.get('writer_pid') and snapshot['writer_pid'] not in {r['pid'] for r in roots})
+        not writer_current
         or (updated and updated < min(r['created_at'] for r in roots) - 1))
     if not source_current:
         issues = []

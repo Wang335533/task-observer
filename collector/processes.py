@@ -98,6 +98,7 @@ class ProcessSampler:
                     changed = True
         cpu = memory = 0
         readable = 0
+        members = []
         for p in selected.values():
             key = (p['pid'], p['create_time'])
             try:
@@ -111,6 +112,7 @@ class ProcessSampler:
                 cpu += handle.cpu_percent() / (psutil.cpu_count() or 1)
                 memory += handle.memory_info().rss
                 readable += 1
+                members.append({'pid': p['pid'], 'created_at': p['create_time']})
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
         alive = {(p['pid'], p['create_time']) for p in items}
@@ -119,5 +121,5 @@ class ProcessSampler:
         roots = [p for p in roots if p.get('ppid') not in root_by_pid]
         return {'roots': [{'pid': p['pid'], 'created_at': p['create_time'],
                            'identity': f"{p['pid']}:{p['create_time']:.4f}"} for p in roots],
-                'process_count': len(selected), 'cpu_percent': round(cpu, 2) if readable else None,
+                'members': members, 'process_count': len(selected), 'cpu_percent': round(cpu, 2) if readable else None,
                 'memory_bytes': memory if readable else None}

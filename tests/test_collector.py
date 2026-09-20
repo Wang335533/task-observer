@@ -57,10 +57,12 @@ def test_process_tree_and_pid_reuse():
         assert result['process_count'] == 2
         assert result['memory_bytes'] == 2048
         assert len(result['roots']) == 1
+        assert {p['pid'] for p in result['members']} == {10, 11}
         # Same PID with a new creation time never reuses a stale handle.
         newer = [proc(['-m', 'grokspider', 'catchup'], created=200)]
         result = sampler.collect(module_task(), newer)
         assert result['memory_bytes'] is None
+        assert result['members'] == []
         assert (10, 100) not in sampler.handles
 
 
@@ -144,6 +146,31 @@ def test_old_failed_snapshot_not_assigned_to_new_run():
     state = view_state(snapshot, {'roots': [{'pid': 6, 'created_at': 120}]}, None, 125, 'tieba')
     assert state['source_current'] is False
     assert state['run_state'] == 'running' and state['health'] == 'ok'
+
+
+def test_snapshot_written_by_virtualenv_child_is_current():
+    resource = {'roots': [{'pid': 10, 'created_at': 100}],
+                'members': [{'pid': 10, 'created_at': 100}, {'pid': 11, 'created_at': 101}]}
+    snapshot = adapters.base_snapshot() | {'updated_at': 120, 'writer_pid': 11,
+        'issues': [{'code': 'review', 'level': 'attention', 'message': 'review'}]}
+    state = view_state(snapshot, resource, None, 125, 'tieba')
+    assert state['source_current'] and state['health'] == 'attention'
+    # An unrelated writer and a reused child PID are not accepted.
+    assert not view_state(snapshot | {'writer_pid': 99}, resource, None, 125, 'tieba')['source_current']
+    newer = dict(resource, members=[{'pid': 10, 'created_at': 100}, {'pid': 11, 'created_at': 130}])
+    assert not view_state(snapshot, newer, None, 135, 'tieba')['source_current']
+
+
+def test_child_writer_metrics_remain_visible_in_task_view(tmp_path):
+    service = Service(tmp_path, seed=False)
+    service.store.save_task({'id': 'tieba', 'name': 'Test'})
+    snapshot = adapters.base_snapshot() | {'updated_at': 120, 'writer_pid': 11,
+        'metrics': [{'key': 'posts', 'label': '帖子', 'value': 42, 'unit': ''}]}
+    resource = {'roots': [{'pid': 10, 'created_at': 100}], 'members': [{'pid': 11, 'created_at': 101}]}
+    service.runtime['tieba'] = {'snapshot': snapshot, 'resource': resource,
+        'view': view_state(snapshot, resource, None, 125, 'tieba')}
+    assert service.task_views()[0]['snapshot']['metrics'][0]['value'] == 42
+    service.close()
 
 
 def test_alert_dedup_recovery_and_acknowledge(tmp_path):
