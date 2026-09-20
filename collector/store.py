@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 import threading
 import time
@@ -29,6 +30,7 @@ class Store:
               CREATE TABLE IF NOT EXISTS alerts(id INTEGER PRIMARY KEY, task_id TEXT, code TEXT,
                 level TEXT, message TEXT, created REAL, resolved REAL, acknowledged INTEGER DEFAULT 0);
               CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, task_id TEXT, at REAL, message TEXT);
+              CREATE TABLE IF NOT EXISTS latest_snapshots(task_id TEXT PRIMARY KEY, rule_key TEXT NOT NULL, snapshot TEXT NOT NULL);
             ''')
             initialized = self.db.execute("SELECT value FROM settings WHERE key='initialized'").fetchone()
             if not initialized:
@@ -89,7 +91,9 @@ class Store:
     def record_run(self, task_id, identity, started, status, ended=None):
         key = f'{task_id}:{identity}'
         with self.lock:
-            old = self.db.execute('SELECT status FROM runs WHERE id=?', (key,)).fetchone()
+            old = self.db.execute('SELECT status,ended FROM runs WHERE id=?', (key,)).fetchone()
+            if old and old['status'] == status and old['ended'] == ended:
+                return
             self.db.execute('''INSERT INTO runs VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
                 ended=excluded.ended,status=excluded.status''', (key, task_id, started, ended, status, time.time()))
             self.db.commit()
@@ -109,6 +113,32 @@ class Store:
             self.db.execute('INSERT INTO samples(task_id,at,cpu,memory,metrics) VALUES(?,?,?,?,?)',
                             (task_id, time.time(), resource.get('cpu_percent'), resource.get('memory_bytes'), json.dumps(metrics)))
             self.db.commit()
+
+    @staticmethod
+    def rule_key(task):
+        return hashlib.sha256(json.dumps(task, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
+
+    def save_snapshot(self, task, snapshot):
+        with self.lock:
+            self.db.execute('INSERT OR REPLACE INTO latest_snapshots VALUES(?,?,?)',
+                            (task['id'], self.rule_key(task), json.dumps(snapshot, ensure_ascii=False, allow_nan=False)))
+            self.db.commit()
+
+    def load_snapshot(self, task):
+        with self.lock:
+            row = self.db.execute('SELECT snapshot FROM latest_snapshots WHERE task_id=? AND rule_key=?',
+                                  (task['id'], self.rule_key(task))).fetchone()
+        if not row:
+            return None
+        try:
+            snapshot = json.loads(row[0])
+            if not isinstance(snapshot, dict) or not isinstance(snapshot.get('metrics'), list):
+                return None
+            snapshot['cached'] = True
+            snapshot['note'] = (snapshot.get('note') or '') + ' 当前为恢复的本机缓存，保留原统计时间，等待本轮检查。'
+            return snapshot
+        except (ValueError, TypeError):
+            return None
 
     def query(self, sql, args=()):
         with self.lock:

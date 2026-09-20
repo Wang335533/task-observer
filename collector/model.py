@@ -57,8 +57,6 @@ def validate_task(value):
             raise ValueError(f'{key} 必须使用绝对路径')
     if result['adapter'] in ('json', 'tieba', 'msqa', 'kokusho', 'cnki') and not result['snapshot']:
         raise ValueError('请指定进度文件或分片目录')
-    if result['adapter'] == 'grok' and not result['python']:
-        raise ValueError('请指定 Grok 项目的 Python 解释器')
     commands = result.get('subcommands', [])
     if not isinstance(commands, list) or any(not isinstance(s, str) or not re.fullmatch(r'[\w-]+', s) for s in commands):
         raise ValueError('子命令请用英文逗号分隔，只包含字母、数字、下划线或连字符')

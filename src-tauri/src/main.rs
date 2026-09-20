@@ -1,8 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod ui_power;
+mod recovery;
+
 use serde_json::{json, Value};
 use std::{collections::HashMap, io::{BufRead, BufReader, Write}, path::PathBuf,
-    process::{Child, ChildStdin, Command, Stdio}, sync::{atomic::{AtomicU64, Ordering}, Arc, Mutex}};
+    process::{Child, ChildStdin, Command, Stdio}, sync::{atomic::{AtomicBool, AtomicU64, Ordering}, Arc, Mutex}};
 use tauri::{Emitter, Manager, menu::{Menu, MenuItem}, tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState}};
 use tauri_plugin_notification::NotificationExt;
 use tokio::sync::oneshot;
@@ -14,15 +17,20 @@ struct Bridge {
     pending: Mutex<HashMap<u64, oneshot::Sender<Reply>>>,
     counter: AtomicU64,
     error: Mutex<Option<String>>,
+    generation: AtomicU64,
+    shutting_down: AtomicBool,
+    notifications: AtomicBool,
 }
 
 impl Bridge {
     fn new() -> Self {
         Self { input: Mutex::new(None), child: Mutex::new(None), pending: Mutex::new(HashMap::new()),
-            counter: AtomicU64::new(1), error: Mutex::new(None) }
+            counter: AtomicU64::new(1), error: Mutex::new(None), generation: AtomicU64::new(0),
+            shutting_down: AtomicBool::new(false), notifications: AtomicBool::new(true) }
     }
 
     fn shutdown(&self) {
+        self.shutting_down.store(true, Ordering::SeqCst);
         // Closing only our collector's stdin allows it to exit. Business processes
         // have never been started by this application and are never terminated.
         self.input.lock().unwrap().take();
@@ -35,8 +43,12 @@ impl Bridge {
 
 #[tauri::command]
 async fn collector_request(method: String, params: Value, bridge: tauri::State<'_, Arc<Bridge>>) -> Reply {
-    let allowed = ["snapshot", "detail", "history", "logs", "save_task", "set_notifications", "acknowledge"];
-    if !allowed.contains(&method.as_str()) { return Err("不支持的操作".into()); }
+    bridge_request(&bridge, &method, params).await
+}
+
+async fn bridge_request(bridge: &Arc<Bridge>, method: &str, params: Value) -> Reply {
+    let allowed = ["snapshot", "detail", "history", "logs", "save_task", "set_notifications", "acknowledge", "ping"];
+    if !allowed.contains(&method) { return Err("不支持的操作".into()); }
     if let Some(error) = bridge.error.lock().unwrap().as_ref() { return Err(error.clone()); }
     let id = bridge.counter.fetch_add(1, Ordering::SeqCst);
     let (sender, receiver) = oneshot::channel();
@@ -51,7 +63,17 @@ async fn collector_request(method: String, params: Value, bridge: tauri::State<'
     };
     if let Err(error) = write_result { bridge.pending.lock().unwrap().remove(&id); return Err(error); }
     match tokio::time::timeout(std::time::Duration::from_secs(15), receiver).await {
-        Ok(Ok(reply)) => reply,
+        Ok(Ok(reply)) => {
+            if let Ok(value) = &reply {
+                if let Some(enabled) = value["settings"]["notifications"].as_bool() {
+                    bridge.notifications.store(enabled, Ordering::SeqCst);
+                }
+            }
+            if method == "set_notifications" && reply.is_ok() {
+                bridge.notifications.store(params["enabled"].as_bool().unwrap_or(false), Ordering::SeqCst);
+            }
+            reply
+        },
         _ => { bridge.pending.lock().unwrap().remove(&id); Err("采集器响应超时；业务任务不受影响".into()) }
     }
 }
@@ -89,12 +111,15 @@ fn start_collector(app: &tauri::AppHandle, bridge: Arc<Bridge>) -> Result<(), Bo
         command.creation_flags(0x08000000);
     }
     let mut child = command.spawn()?;
+    let generation = bridge.generation.fetch_add(1, Ordering::SeqCst) + 1;
+    *bridge.error.lock().unwrap() = None;
     let output = child.stdout.take().unwrap();
     *bridge.input.lock().unwrap() = child.stdin.take();
     *bridge.child.lock().unwrap() = Some(child);
     let handle = app.clone();
     std::thread::spawn(move || {
         for line in BufReader::new(output).lines().map_while(Result::ok) {
+            if bridge.generation.load(Ordering::SeqCst) != generation { return; }
             if let Ok(message) = serde_json::from_str::<Value>(&line) {
                 if let Some(id) = message.get("id").and_then(Value::as_u64) {
                     if let Some(sender) = bridge.pending.lock().unwrap().remove(&id) {
@@ -116,7 +141,8 @@ fn start_collector(app: &tauri::AppHandle, bridge: Arc<Bridge>) -> Result<(), Bo
                 }
             }
         }
-        let error = "本地采集器已断开，请退出并重新打开应用；业务任务不受影响".to_string();
+        if bridge.generation.load(Ordering::SeqCst) != generation || bridge.shutting_down.load(Ordering::SeqCst) { return; }
+        let error = "本地采集器已断开，等待后台自动恢复；业务任务不受影响".to_string();
         *bridge.error.lock().unwrap() = Some(error.clone());
         for (_, sender) in bridge.pending.lock().unwrap().drain() { let _ = sender.send(Err(error.clone())); }
     });
@@ -124,7 +150,7 @@ fn start_collector(app: &tauri::AppHandle, bridge: Arc<Bridge>) -> Result<(), Bo
 }
 
 fn show_window(app: &tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") { let _ = window.unminimize(); let _ = window.show(); let _ = window.set_focus(); let _ = window.emit("observer-visible", true); }
+    if let Some(window) = app.get_webview_window("main") { ui_power::show(&window); }
 }
 
 fn main() {
@@ -145,6 +171,7 @@ fn main() {
             if let Err(error) = start_collector(app.handle(), bridge.clone()) {
                 *bridge.error.lock().unwrap() = Some(format!("无法启动本地采集器：{error}"));
             }
+            recovery::start(app.handle().clone(), bridge.clone());
             let open = MenuItem::with_id(app, "open", "打开任务观测台", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出（停止监控）", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &quit])?;
@@ -159,12 +186,15 @@ fn main() {
                     if matches!(event, TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. }) { show_window(tray.app_handle()); }
                 }).build(app)?;
             if std::env::args().any(|a| a == "--minimized") {
-                if let Some(window) = app.get_webview_window("main") { let _ = window.hide(); }
+                if let Some(window) = app.get_webview_window("main") { ui_power::hide(&window); }
             }
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event { api.prevent_close(); let _ = window.hide(); }
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                if let Some(view) = window.app_handle().get_webview_window(window.label()) { ui_power::hide(&view); }
+            }
         })
         .build(tauri::generate_context!()).expect("无法初始化任务观测台")
         .run(move |_, event| { if let tauri::RunEvent::Exit = event { exit_bridge.shutdown(); } });

@@ -22,3 +22,11 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run test:ui
+      - name: Build collector sidecar
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --onefile --console --name task-observer-collector --paths . --distpath src-tauri/binaries --workpath build/collector --specpath build collector/main.py
+          if ($LASTEXITCODE -ne 0) { throw 'Sidecar build failed' }
+          Copy-Item src-tauri/binaries/task-observer-collector.exe src-tauri/binaries/task-observer-collector-x86_64-pc-windows-msvc.exe
+      - run: python scripts/smoke_collector.py
+      - run: cargo test --manifest-path src-tauri/Cargo.toml

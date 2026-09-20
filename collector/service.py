@@ -71,6 +71,7 @@ class Service:
         self.runtime = {}
         self.pending = {}
         self.last_scan = None
+        self.last_scan_monotonic = None
         self.scan_error = None
         self.self_process = psutil.Process()
         self.self_process.cpu_percent()
@@ -112,8 +113,10 @@ class Service:
         with self.lock:
             for task in self.store.tasks():
                 task_id = task['id']
-                state = self.runtime.setdefault(task_id, dict(snapshot=adapters.base_snapshot(), resource={'roots': []},
-                    error=None, next_check=0, last_sample=0, seen_roots={}, generation=0))
+                if task_id not in self.runtime:
+                    self.runtime[task_id] = dict(snapshot=self.store.load_snapshot(task) or adapters.base_snapshot(), resource={'roots': []},
+                        error=None, next_check=0, last_sample=0, seen_roots={}, generation=0)
+                state = self.runtime[task_id]
                 pending = self.pending.get(task_id)
                 completed = False
                 if pending and pending[0].done():
@@ -137,6 +140,7 @@ class Service:
                                 if changes:
                                     self.store.event(task_id, ' · '.join(changes))
                             state.update(snapshot=snapshot, error=None)
+                            self.store.save_snapshot(task, snapshot)
                         except Exception as exc:
                             if isinstance(exc, subprocess.TimeoutExpired):
                                 message = '本次进度读取超时，暂时保留上次统计'
@@ -191,6 +195,7 @@ class Service:
                     state['last_sample'] = now
             if sample_resources:
                 self.last_scan = now
+                self.last_scan_monotonic = time.monotonic()
                 self.own_usage = dict(cpu_percent=round(self.self_process.cpu_percent() / (psutil.cpu_count() or 1), 2),
                                       memory_bytes=self.self_process.memory_info().rss)
         return changed
@@ -210,6 +215,9 @@ class Service:
         return views
 
     def request(self, method, params):
+        if method == 'ping':
+            return dict(sample_age=None if self.last_scan_monotonic is None else time.monotonic() - self.last_scan_monotonic,
+                        notifications=bool(self.store.setting('notifications')))
         if method == 'snapshot':
             return dict(tasks=self.task_views(), last_scan=self.last_scan, scan_error=self.scan_error,
                         observer=self.own_usage, data_dir=str(self.store.directory),

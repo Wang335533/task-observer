@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
-import subprocess
 import time
 from pathlib import Path
 
@@ -61,7 +59,7 @@ def normalize_grok(raw):
         heartbeat_at=timestamp(run.get('heartbeat_at')), writer_pid=(raw.get('lock_owner') or {}).get('pid'),
         current=(raw.get('recent_window') or {}).get('time_segment') or '',
         cached=bool(inspection.get('cached_fields') or inspection.get('query_errors')),
-        note='业务数量来自最近一次完整导出，通常滞后约 5 分钟；数据库读取超时会保留旧值。',
+        note='业务数量来自最近一次完整导出的汇总，保留原统计时间；队列读取使用独立短时限，超时项沿用旧值或保持未知。',
     )
     for name, prefix in [('thread_queue', '会话'), ('user_queue', '用户')]:
         for key, label in [('done', '已完成'), ('pending', '待处理'), ('retry_wait', '等待重试'), ('dead_letter', '待核查')]:
@@ -130,15 +128,8 @@ def collect(task):
         return normalize_tieba(read_json(task['snapshot']))
     if task['adapter'] == 'json':
         return normalize_generic(read_json(task['snapshot']), task)
-    # Only this fixed, audited progress command is allowed. No arbitrary shell.
-    environment = dict(os.environ, PYTHONDONTWRITEBYTECODE='1', PYTHONIOENCODING='utf-8')
-    result = subprocess.run([task['python'], '-B', '-m', 'grokspider.progress'],
-                            cwd=task['project'], env=environment, capture_output=True,
-                            text=True, encoding='utf-8', errors='replace', timeout=45,
-                            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-    if result.returncode:
-        raise ValueError('Grok 只读进度检查失败：' + redact(result.stderr[-600:]))
-    return normalize_grok(json.loads(result.stdout))
+    from .grok_probe import collect_grok
+    return normalize_grok(collect_grok(task))
 
 
 def read_log(task, limit=200):

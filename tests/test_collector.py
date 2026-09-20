@@ -95,17 +95,6 @@ def test_generic_unknown_total_and_identity():
     assert adapters.normalize_generic(raw, {'id': 'train'})['total'] is None
 
 
-def test_fixed_readonly_command_and_timeout():
-    task = dict(module_task(), python='python.exe')
-    with patch('collector.adapters.subprocess.run', side_effect=subprocess.TimeoutExpired('progress', 45)) as run:
-        with pytest.raises(subprocess.TimeoutExpired): adapters.collect(task)
-    args, kwargs = run.call_args
-    assert args[0] == ['python.exe', '-B', '-m', 'grokspider.progress']
-    assert '--save' not in args[0]
-    assert kwargs['timeout'] == 45 and 'shell' not in kwargs
-    assert kwargs['env']['PYTHONDONTWRITEBYTECODE'] == '1'
-
-
 def test_missing_corrupt_snapshot_and_log_rotation(tmp_path):
     target = tmp_path / 'status.json'
     with pytest.raises(FileNotFoundError): adapters.read_json(target)
