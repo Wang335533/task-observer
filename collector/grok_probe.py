@@ -71,18 +71,32 @@ def collect_grok(task):
         config = importlib.import_module(package + '.config')
         progress = importlib.import_module(package + '.progress')
     settings = config.load_config()
-    baseline = settings.root_dir / 'work/grok-progress-monitor/latest.json'
-    previous = {}
-    try:
-        if baseline.stat().st_size <= 4 * 1024 * 1024:
-            with baseline.open(encoding='utf-8-sig') as handle:
-                value = json.load(handle)
-                if isinstance(value, dict):
-                    previous = value
-    except (OSError, ValueError):
-        pass  # A missing/corrupt old cache must not prevent fresh metadata reads.
+    source_key = str(Path(settings.state_db).resolve()).casefold()
+    saved = (task.get('_previous') or {}).get('_grok_cache') or {}
+    previous = saved.get('fields', {}) if saved.get('source') == source_key else {}
     # None means unknown; the observer separately checks real PID identities.
     result = progress.collect(settings, previous, processes=None, reader=BudgetReader(settings.state_db))
     result['inspection']['monitor_query_budget_seconds'] = 3
     result['inspection']['process_inventory'] = 'handled by observer'
+    cached = result['inspection'].get('cached_fields', [])
+    current_run = (result.get('run') or {}).get('run_id')
+    previous_run = (previous.get('run') or {}).get('run_id')
+    if current_run and previous_run and current_run != previous_run:
+        for key in cached:
+            result[key] = None
+    # Keep only fields the dashboard displays. Never persist account/config secrets.
+    fields = {}
+    allowed = {'run': ('run_id', 'status', 'started_at', 'finished_at', 'heartbeat_at'),
+               'scope': ('phase',), 'recent_window': ('time_segment',),
+               'thread_queue': ('done', 'pending', 'retry_wait', 'dead_letter'),
+               'user_queue': ('done', 'pending', 'retry_wait', 'dead_letter')}
+    for key, names in allowed.items():
+        fields[key] = {name: (result.get(key) or {}).get(name) for name in names}
+    datasets = result.get('datasets') or {}
+    fields['datasets'] = {key: {'actual': (datasets.get(key) or {}).get('actual')} for key in ('posts', 'comments', 'users')}
+    fields['datasets']['statistics_at'] = result['inspection'].get('statistics_at')
+    checked = result.get('checked_at')
+    old_times = saved.get('times', {}) if previous else {}
+    times = {key: old_times.get(key) if key in cached else checked for key in fields}
+    result['_grok_cache'] = dict(source=source_key, fields=fields, times=times)
     return result

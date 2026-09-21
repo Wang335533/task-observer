@@ -6,7 +6,6 @@ import subprocess
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import psutil
@@ -15,20 +14,48 @@ from . import adapters
 from .model import REFRESH_SECONDS, STALE_SECONDS, redact, validate_task
 from .processes import ProcessSampler
 from .store import Store
+from .readers import ReadPool
+
+
+def terminal_state(snapshot):
+    status = snapshot.get('status')
+    if status in ('completed', 'success', 'succeeded'):
+        return 'completed'
+    if status in ('failed', 'error', 'crashed'):
+        return 'failed'
+    if status in ('incomplete', 'completed_with_gaps', 'needs_attention'):
+        return 'incomplete'
+    return None
+
+
+def owner_members(snapshot, identity):
+    owner = snapshot.get('_observed_owner') or {}
+    return owner.get('members', []) if identity in owner.get('roots', []) else []
+
+
+def run_result(snapshot, identity, root):
+    finished = snapshot.get('finished_at')
+    started = snapshot.get('started_at')
+    members = owner_members(snapshot, identity) or [root]
+    matches = any(m['pid'] == snapshot.get('writer_pid') for m in members)
+    if matches and finished and finished >= root['created_at'] and (started is None or abs(started - root['created_at']) < 30):
+        return terminal_state(snapshot) or 'unknown_end'
+    return 'unknown_end'
 
 
 def view_state(snapshot, resource, adapter_error, now, adapter):
     running = bool(resource.get('roots'))
     issues = copy.deepcopy(snapshot.get('issues', []))
     updated = snapshot.get('updated_at')
-    roots = resource.get('roots', [])
-    members = resource.get('members', roots)
+    roots = resource.get('roots') or resource.get('last_roots', [])
+    members = resource.get('members') or resource.get('last_members') or roots
     writer = snapshot.get('writer_pid')
     writer_current = not writer or any(
         p['pid'] == writer and (updated is None or updated >= p['created_at'] - 1)
         for p in members)
-    source_current = not running or not (
+    source_current = not roots or not (
         not writer_current
+        or (snapshot.get('started_at') and snapshot['started_at'] < min(r['created_at'] for r in roots) - 30)
         or (updated and updated < min(r['created_at'] for r in roots) - 1))
     if not source_current:
         issues = []
@@ -37,9 +64,12 @@ def view_state(snapshot, resource, adapter_error, now, adapter):
         issues.append(dict(code='collector_error', level='collector', message=adapter_error))
     elif running and stale and updated is not None and adapter != 'process':
         issues.append(dict(code='stale', level='collector', message='进度快照超过 15 分钟未更新'))
+    statistics = snapshot.get('statistics_at')
+    if running and source_current and statistics is not None and now - statistics > STALE_SECONDS:
+        issues.append(dict(code='statistics_stale', level='collector', message='业务统计超过 15 分钟未更新，检查成功不代表统计已更新'))
     if running and source_current and snapshot.get('heartbeat_at') and now - snapshot['heartbeat_at'] > STALE_SECONDS:
         issues.append(dict(code='heartbeat', level='attention', message='进程仍在运行，但任务心跳已超过 15 分钟未更新'))
-    status = snapshot.get('status', 'unknown')
+    status = snapshot.get('status', 'unknown') if source_current else 'running'
     if running:
         run_state = 'service_online' if adapter == 'ssrn' else 'running'
     elif status in ('completed', 'success', 'succeeded'):
@@ -67,7 +97,9 @@ class Service:
         self.stop = threading.Event()
         self.wake = threading.Event()
         self.rescan = threading.Event()
-        self.pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix='progress')
+        self.pool = ReadPool()
+        self.collector_generation = self.store.next_generation()
+        self.revision = 0
         self.runtime = {}
         self.pending = {}
         self.last_scan = None
@@ -84,7 +116,7 @@ class Service:
     def close(self):
         self.stop.set()
         self.wake.set()
-        self.pool.shutdown(wait=False, cancel_futures=True)
+        self.pool.shutdown(wait=True, cancel_futures=True)
 
     def loop(self):
         next_scan = 0
@@ -95,20 +127,30 @@ class Service:
             if sample_resources:
                 self.rescan.clear()
                 # Start-to-start cadence. Skip missed cycles after sleep; never replay a burst.
-                next_scan = now + REFRESH_SECONDS
+                if now >= next_scan:
+                    next_scan = now + REFRESH_SECONDS
             try:
                 changed = self.tick(sample_resources=sample_resources)
-                self.scan_error = None
+                with self.lock:
+                    if self.scan_error is not None:
+                        self.scan_error = None
+                        self.revision += 1
+                        changed = True
             except Exception as exc:
-                self.scan_error = redact(str(exc))
+                with self.lock:
+                    self.scan_error = redact(str(exc))
+                    self.revision += 1
                 changed = True
             if changed and not self.stop.is_set():
                 self.emit(dict(type='snapshot_updated', snapshot=self.request('snapshot', {})))
-            self.wake.wait(max(.01, next_scan - time.monotonic()))
+            with self.lock:
+                deadlines = [s['next_check'] for key, s in self.runtime.items() if key not in self.pending]
+            self.wake.wait(max(.01, min([next_scan] + deadlines) - time.monotonic()))
 
     def tick(self, sample_resources=True):
         inventory = self.sampler.inventory(self.store.tasks()) if sample_resources else None
         now = time.time()
+        monotonic = time.monotonic()
         changed = sample_resources
         with self.lock, self.store.batch():
             for task in self.store.tasks():
@@ -123,13 +165,14 @@ class Service:
                     future, generation = self.pending.pop(task_id)
                     if generation != state['generation']:
                         # An edit during an in-flight read must get its first result promptly.
-                        self.rescan.set()
                         self.wake.set()
                     if generation == state['generation']:
                         changed = completed = True
                         try:
                             snapshot = future.result()
                             old = state['snapshot']
+                            if old.get('_observed_owner'):
+                                snapshot['_observed_owner'] = old['_observed_owner']
                             if old.get('run_id') and old.get('run_id') == snapshot.get('run_id'):
                                 previous = {m['key']: m['value'] for m in old.get('metrics', [])}
                                 changes = []
@@ -139,7 +182,7 @@ class Service:
                                         changes.append(f"{metric['label']} +{after - before:,}")
                                 if changes:
                                     self.store.event(task_id, ' · '.join(changes))
-                            state.update(snapshot=snapshot, error=None)
+                            state.update(snapshot=snapshot, error=None, check_status='success', last_success_at=now)
                             self.store.save_snapshot(task, snapshot)
                         except Exception as exc:
                             if isinstance(exc, subprocess.TimeoutExpired):
@@ -153,37 +196,52 @@ class Service:
                             else:
                                 message = redact(str(exc))
                             state['error'] = message[:800]
+                            state['check_status'] = 'timeout' if isinstance(exc, (TimeoutError, subprocess.TimeoutExpired)) else 'error'
                         state['last_checked_at'] = now
-                if sample_resources and task_id not in self.pending:
-                    future = self.pool.submit(adapters.collect, copy.deepcopy(task))
+                        state['read_duration'] = max(0, monotonic - state.get('check_started_monotonic', monotonic))
+                if task_id not in self.pending and monotonic >= state['next_check']:
+                    payload = copy.deepcopy(task)
+                    payload['_previous'] = copy.deepcopy(state['snapshot'])
+                    future = self.pool.submit(adapters.collect, payload)
                     self.pending[task_id] = (future, state['generation'])
+                    state.update(next_check=monotonic + REFRESH_SECONDS, next_check_at=now + REFRESH_SECONDS,
+                                 check_started_at=now, check_started_monotonic=monotonic, check_status='checking')
                     future.add_done_callback(lambda _: self.wake.set())
+                    changed = True
                 if not sample_resources and not completed:
                     continue
                 resource = self.sampler.collect(task, inventory) if sample_resources else state['resource']
                 state['resource'] = resource
                 snapshot = state['snapshot']
                 current_roots = {root['identity']: root for root in resource['roots']}
+                if current_roots:
+                    state['last_members'] = resource.get('members', resource['roots'])
                 for identity, root in current_roots.items():
                     self.store.record_run(task_id, identity, root['created_at'], 'running')
                 for identity, root in state['seen_roots'].items():
                     if identity not in current_roots:
-                        final = 'unknown_end'
-                        finished = snapshot.get('finished_at')
-                        if snapshot.get('writer_pid') == root['pid'] and finished and finished >= root['created_at']:
-                            value = snapshot.get('status')
-                            final = 'completed' if value in ('completed', 'success', 'succeeded') else ('failed' if value in ('failed', 'error', 'crashed') else 'incomplete')
+                        final = run_result(snapshot, identity, root)
                         self.store.record_run(task_id, identity, root['created_at'], final, now)
                 state['seen_roots'] = current_roots
+                if not current_roots:
+                    last = self.store.query('SELECT id,started FROM runs WHERE task_id=? ORDER BY started DESC LIMIT 1', (task_id,))
+                    if last:
+                        identity = ':'.join(last[0]['id'].rsplit(':', 2)[1:])
+                        resource['last_roots'] = [{'pid': int(last[0]['id'].rsplit(':', 2)[1]), 'created_at': last[0]['started']}]
+                        resource['last_members'] = owner_members(snapshot, identity) or state.get('last_members', [])
                 # A terminal snapshot can arrive after the process-disappearance scan.
                 if snapshot.get('finished_at') and snapshot.get('started_at'):
                     for row in self.store.query("SELECT * FROM runs WHERE task_id=? AND status='unknown_end' ORDER BY started DESC LIMIT 5", (task_id,)):
                         _, pid, created = row['id'].rsplit(':', 2)
-                        if snapshot.get('writer_pid') == int(pid) and abs(snapshot['started_at'] - float(created)) < 30 and snapshot['finished_at'] >= row['started']:
-                            value = snapshot.get('status')
-                            final = 'completed' if value in ('completed', 'success', 'succeeded') else 'failed' if value in ('failed', 'error', 'crashed') else 'incomplete'
+                        final = run_result(snapshot, f'{pid}:{created}', {'pid': int(pid), 'created_at': float(created)})
+                        if final != 'unknown_end':
                             self.store.record_run(task_id, f'{pid}:{created}', row['started'], final, snapshot['finished_at'])
                 health = view_state(snapshot, resource, state['error'], now, task['adapter'])
+                if health['source_current'] and len(current_roots) == 1:
+                    owner = dict(roots=list(current_roots), members=resource.get('members') or resource['roots'])
+                    if owner != snapshot.get('_observed_owner'):
+                        snapshot['_observed_owner'] = owner
+                        self.store.save_snapshot(task, snapshot)
                 if health['run_state'] == 'idle' and self.store.query('SELECT id FROM runs WHERE task_id=? LIMIT 1', (task_id,)):
                     health['run_state'] = 'unknown_end'
                 state['view'] = health
@@ -198,6 +256,8 @@ class Service:
                 self.last_scan_monotonic = time.monotonic()
                 self.own_usage = dict(cpu_percent=round(self.self_process.cpu_percent() / (psutil.cpu_count() or 1), 2),
                                       memory_bytes=self.self_process.memory_info().rss)
+            if changed:
+                self.revision += 1
         return changed
 
     def task_views(self):
@@ -206,24 +266,33 @@ class Service:
             for task in self.store.tasks():
                 state = self.runtime.get(task['id'], {})
                 snapshot = copy.deepcopy(state.get('snapshot', adapters.base_snapshot()))
+                snapshot = {k: v for k, v in snapshot.items() if not k.startswith('_')}
                 if state.get('view', {}).get('source_current') is False:
                     snapshot = adapters.base_snapshot() | {'stage': '新一轮运行，等待进度', 'note': '旧快照属于先前的运行，暂不作为当前进度展示。'}
                 views.append(dict(config=task, snapshot=snapshot,
                                   resource=copy.deepcopy(state.get('resource', {'roots': []})),
                                   view=copy.deepcopy(state.get('view', dict(run_state='idle', health='ok', issues=[], stale=True))),
-                                  checking=task['id'] in self.pending, last_checked_at=state.get('last_checked_at')))
+                                  checking=task['id'] in self.pending, last_checked_at=state.get('last_checked_at'),
+                                  check_status=state.get('check_status', 'waiting'), last_success_at=state.get('last_success_at'),
+                                  check_started_at=state.get('check_started_at'), next_check_at=state.get('next_check_at'),
+                                  read_duration=state.get('read_duration')))
         return views
 
     def request(self, method, params):
         if method == 'ping':
-            return dict(sample_age=None if self.last_scan_monotonic is None else time.monotonic() - self.last_scan_monotonic,
-                        notifications=bool(self.store.setting('notifications')))
+            with self.lock:
+                overdue = any(time.monotonic() - self.runtime.get(key, {}).get('check_started_monotonic', time.monotonic()) > 45
+                              for key, pending in self.pending.items() if not pending[0].done())
+                return dict(sample_age=None if self.last_scan_monotonic is None else time.monotonic() - self.last_scan_monotonic,
+                            readers_overdue=overdue, notifications=bool(self.store.setting('notifications')))
         if method == 'snapshot':
-            return dict(tasks=self.task_views(), last_scan=self.last_scan, scan_error=self.scan_error,
-                        observer=self.own_usage, data_dir=str(self.store.directory),
-                        settings=dict(notifications=bool(self.store.setting('notifications'))),
-                        alerts=self.store.query('SELECT * FROM alerts ORDER BY created DESC LIMIT 100'),
-                        events=self.store.query('SELECT * FROM events ORDER BY at DESC LIMIT 100'))
+            with self.lock:
+                return dict(tasks=self.task_views(), last_scan=self.last_scan, scan_error=self.scan_error,
+                            collector_generation=self.collector_generation, revision=self.revision,
+                            observer=self.own_usage, data_dir=str(self.store.directory),
+                            settings=dict(notifications=bool(self.store.setting('notifications'))),
+                            alerts=self.store.query('SELECT * FROM alerts ORDER BY created DESC LIMIT 100'),
+                            events=self.store.query('SELECT * FROM events ORDER BY at DESC LIMIT 100'))
         if method == 'save_task':
             incoming = params.get('task') or {}
             task = validate_task(incoming)
@@ -235,17 +304,26 @@ class Service:
                     raise ValueError('未找到要编辑的任务')
                 self.store.save_task(task)
                 old = self.runtime.get(task['id'], {})
+                pending = self.pending.get(task['id'])
+                if pending and hasattr(pending[0], 'abort'):
+                    pending[0].abort()
                 self.runtime[task['id']] = dict(snapshot=adapters.base_snapshot(), resource={'roots': []}, error=None,
                     next_check=0, last_sample=0, seen_roots={}, generation=old.get('generation', 0) + 1)
                 self.store.event(task['id'], '已更新关注任务' if task['id'] in exists else '已添加关注任务')
+                self.revision += 1
                 self.rescan.set()
                 self.wake.set()
             return task
         if method == 'set_notifications':
-            return self.store.setting('notifications', bool(params.get('enabled')))
+            with self.lock:
+                result = self.store.setting('notifications', bool(params.get('enabled')))
+                self.revision += 1
+                return result
         if method == 'acknowledge':
-            self.store.acknowledge(int(params['id']))
-            return True
+            with self.lock:
+                self.store.acknowledge(int(params['id']))
+                self.revision += 1
+                return True
         if method == 'history':
             task_id = params.get('task_id')
             if task_id:

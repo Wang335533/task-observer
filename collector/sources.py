@@ -20,8 +20,8 @@ def normalize_msqa(raw):
         metrics=[metric(key, label, counts.get(key)) for key, label in [
             ('posts_complete', '完整问题'), ('answers', '回答'), ('comments', '评论'),
             ('users', '用户'), ('profiles_complete', '完整用户资料'), ('questions_discovered', '已发现问题')]],
-        queues=[metric('questions_failed', '问题待检查', jobs.get('failed', 0)),
-                metric('profiles_pending', '待处理用户', profiles.get('pending', 0))],
+        queues=[metric('questions_failed', '问题待检查', jobs.get('failed')),
+                metric('profiles_pending', '待处理用户', profiles.get('pending'))],
         stage={'profiles': '补充用户资料', 'questions': '抓取问题与回答', 'inventory': '发现问题索引',
                'exporting': '导出数据', 'finished': '本轮处理结束'}.get(phase, phase or '等待阶段信息'),
         status={'complete': 'completed'}.get(raw.get('status'), raw.get('status', 'unknown')),
@@ -97,6 +97,7 @@ def collect_kokusho(task):
         queues=[metric(key, key + '索引总量', totals[key]) for key in totals],
         stage=f'{incomplete[0]}详情抓取' if incomplete else '详情分片已覆盖全部索引',
         run_id='cumulative-kokusho', updated_at=time.time(), statistics_at=time.time(),
+        statistics_kind='本次观察',
         note='累计详情记录：完整分片按已归档区间计数，当前分片只数完整 JSONL 行；可能包含源站返回的不存在记录。未扫描压缩正文，不以数量推断运行成功。')
 
 
@@ -119,6 +120,8 @@ def _helper_json(port, endpoint):
 
 
 def normalize_ssrn(raw, active_rows, now):
+    if not isinstance(raw.get('downloadStatuses'), list):
+        raise ValueError('SSRN 汇总缺少下载状态，保留上次统计')
     statuses = {row['status']: finite(row.get('count')) for row in raw.get('downloadStatuses', [])}
     downloaded = statuses.get('downloaded', 0)
     active = any(timestamp(row.get('updatedAt')) is not None and
@@ -132,6 +135,7 @@ def normalize_ssrn(raw, active_rows, now):
                 [('resolving', '解析中'), ('resolved', '已解析'), ('downloading', '下载中')]],
         stage='PDF 队列近期有活动' if active else '助手在线，下载活动未确认',
         status='unknown', run_id='cumulative-ssrn-pdf', updated_at=now, statistics_at=now,
+        statistics_kind='本次观察',
         note='仅读取现有助手的汇总；助手在线不代表浏览器正在下载。活动提示来自近 10 分钟的在途队列记录，不能区分等待、冷却与验证暂停。资源和运行历史仅对应助手，不归并共享 Chrome 进程。')
     if (statuses.get('failed') or 0) > 0:
         result['issues'].append(dict(code='pdf_review', level='attention', message=f"{statuses['failed']:,} 个 PDF 失败待重试（累计）"))
@@ -146,7 +150,15 @@ def collect_ssrn(task):
     for status in ('resolving', 'resolved', 'downloading'):
         if statuses.get(status):
             active.extend(_helper_json(port, f'/pdf/queue?status={status}&limit=1').get('queue', []))
-    return normalize_ssrn(raw, active, time.time())
+    result = normalize_ssrn(raw, active, time.time())
+    previous = task.get('_previous') or {}
+    before = {m['key']: m['value'] for m in previous.get('metrics', [])}
+    if previous.get('run_id') == result['run_id'] and any(
+            m['value'] is not None and before.get(m['key']) is not None and m['value'] != before[m['key']]
+            for m in result['metrics']):
+        result['stage'] = 'PDF 汇总较上次检查有变化'
+    result['note'] = '读取助手汇总并比较相邻检查的变化；队列接口按最旧记录排序，抽样未见新活动时只能标为未确认。助手在线不代表浏览器正在下载，不将等待或冷却判作故障。资源和历史仅对应助手。'
+    return result
 
 
 def collect_cnki(task):
@@ -158,7 +170,8 @@ def collect_cnki(task):
     try:
         db.execute('PRAGMA query_only=ON')
         journals = dict(db.execute('SELECT status,COUNT(*) FROM journals WHERE in_scope=1 GROUP BY status').fetchall())
-        current = db.execute("SELECT id,title,updated_at FROM journals WHERE in_scope=1 AND status='processing' ORDER BY id LIMIT 1").fetchone()
+        candidates = db.execute("SELECT id,title,updated_at FROM journals WHERE in_scope=1 AND status='processing' ORDER BY id LIMIT 2").fetchall()
+        current = candidates[0] if len(candidates) == 1 else None
         rows = db.execute('SELECT status,COUNT(*) AS n,SUM(fetched_count) AS fetched FROM issues WHERE journal_id=? GROUP BY status',
                           (current['id'],)).fetchall() if current else []
     except sqlite3.OperationalError as exc:
@@ -179,8 +192,12 @@ def collect_cnki(task):
                 metric('issues_pending', '本刊待处理期次', counts.get('pending', 0) if current else None)],
         run_id='cnki-journal-' + str(current['id']) if current else 'cnki-no-current-journal',
         updated_at=time.time(), statistics_at=time.time(), current=current['title'] if current else '',
+        statistics_kind='本次观察',
         stage='期刊论文元数据抓取' if current else '等待当前期刊信息',
         note='只读查询期刊表和当前期刊的期次汇总，限时 2 秒；不扫描全库论文。本刊论文数由抓取程序按期次更新，不代表全库累计或跨期去重数；切换期刊后该数字会重置。')
     if journals.get('error', 0):
         result['issues'].append(dict(code='journals_review', level='attention', message=f"{journals['error']} 个期刊有错误记录（累计）"))
+    if len(candidates) > 1:
+        result['stage'] = '多个期刊标记处理中，本刊进度暂不归属'
+        result['issues'].append(dict(code='journal_ambiguous', level='attention', message='多个期刊标记处理中，当前期刊无法唯一确认'))
     return result

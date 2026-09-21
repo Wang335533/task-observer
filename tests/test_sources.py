@@ -88,3 +88,22 @@ def test_new_adapter_config_paths_and_loopback_port(tmp_path):
     with pytest.raises(ValueError): validate_task(task | {'helper_port': 80})
     with pytest.raises(ValueError): validate_task(task | {'adapter': 'cnki'})
     assert validate_task(task | {'adapter': 'cnki', 'snapshot': str(tmp_path / 'state.sqlite')})['interval'] == 300
+
+
+def test_cnki_multiple_processing_journals_are_not_arbitrarily_assigned(tmp_path):
+    path = tmp_path / 'state.sqlite'
+    with sqlite3.connect(path) as db:
+        db.executescript('''
+            CREATE TABLE journals(id INTEGER, title TEXT, status TEXT, in_scope INTEGER, updated_at TEXT);
+            INSERT INTO journals VALUES(1,'One','processing',1,NULL),(2,'Two','processing',1,NULL);
+        ''')
+    result = collect_cnki({'snapshot': str(path)})
+    assert result['metrics'][1]['value'] is None
+    assert result['metrics'][3]['value'] == 2
+    assert result['issues'][0]['code'] == 'journal_ambiguous'
+
+
+def test_ssrn_missing_summary_is_not_zero():
+    with pytest.raises(ValueError):
+        normalize_ssrn({'ok': True}, [], 100)
+    assert normalize_ssrn({'ok': True, 'downloadStatuses': []}, [], 100)['metrics'][0]['value'] == 0

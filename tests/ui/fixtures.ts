@@ -32,7 +32,7 @@ export async function mockCollector(page: Page, empty = false, allAdapters = fal
       tasks.push(task)
     }
   }
-  const snapshot: Snapshot = { tasks: empty ? [] : tasks, last_scan: now, scan_error: null,
+  const snapshot: Snapshot = { collector_generation: 1, revision: 1, tasks: empty ? [] : tasks, last_scan: now, scan_error: null,
     observer: { cpu_percent: 0.1, memory_bytes: 32 * 1024 ** 2 }, settings: { notifications: true },
     data_dir: 'C:\\demo\\observer-data', alerts: [], events: [] }
   await page.route('**/__observer', async route => {

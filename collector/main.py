@@ -18,10 +18,15 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data-dir', default=os.environ.get('TASK_OBSERVER_DATA_DIR', str(Path(os.environ.get('LOCALAPPDATA', '.')) / 'TaskObserver')))
     parser.add_argument('--no-seed', action='store_true')
+    parser.add_argument('--probe', action='store_true')
     args = parser.parse_args()
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8', line_buffering=True)
         sys.stdin.reconfigure(encoding='utf-8')
+    if args.probe:
+        from collector.readers import probe_main
+        probe_main()
+        return
     output_lock = threading.Lock()
 
     def emit(value):

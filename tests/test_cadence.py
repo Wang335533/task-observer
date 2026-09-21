@@ -29,22 +29,22 @@ def test_completion_does_not_rescan_resample_or_wait_for_next_cycle(tmp_path):
     service.store.save_task(dict(id='t', name='Task', adapter='json', interval=300))
     service.sampler = Mock(inventory=Mock(return_value=[]), collect=Mock(return_value={'roots': []}))
     try:
-        with patch('collector.service.time.time', return_value=1000):
+        with patch('collector.service.time.time', return_value=1000), patch('collector.service.time.monotonic', return_value=1000):
             service.tick()
         assert len(futures) == 1
         # A slow adapter cannot overlap, even if another regular cycle becomes due.
-        with patch('collector.service.time.time', return_value=1300):
+        with patch('collector.service.time.time', return_value=1300), patch('collector.service.time.monotonic', return_value=1300):
             service.tick()
         assert len(futures) == 1
         futures[0].set_result(adapters.base_snapshot() | {'stage': 'New result'})
         assert service.wake.is_set()
-        with patch('collector.service.time.time', return_value=1301):
+        with patch('collector.service.time.time', return_value=1301), patch('collector.service.time.monotonic', return_value=1301):
             assert service.tick(sample_resources=False)
         assert service.task_views()[0]['snapshot']['stage'] == 'New result'
         assert service.last_scan == 1300
         assert service.sampler.inventory.call_count == 2
         assert len(service.store.query('SELECT * FROM samples')) == 2
-        with patch('collector.service.time.time', return_value=1600):
+        with patch('collector.service.time.time', return_value=1600), patch('collector.service.time.monotonic', return_value=1600):
             service.tick()
         assert len(futures) == 2
     finally:
@@ -94,7 +94,8 @@ def test_edit_during_pending_read_schedules_fresh_read(tmp_path):
     old_read.set_result(adapters.base_snapshot() | {'stage': 'Must not show'})
     try:
         service.tick(sample_resources=False)
-        assert service.rescan.is_set() and service.wake.is_set()
+        assert not service.rescan.is_set() and service.wake.is_set()
+        assert 't' in service.pending  # Immediate replacement, no global recheck.
         assert service.task_views()[0]['snapshot']['stage'] != 'Must not show'
     finally:
         service.close()

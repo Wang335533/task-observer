@@ -7,7 +7,7 @@ export const isDesktop = '__TAURI_INTERNALS__' in window
 export async function subscribeSnapshot(update: (snapshot: Snapshot) => void, refresh: () => void) {
   if (isDesktop) {
     const stopSnapshot = await listen<Snapshot>('observer-snapshot', event => update(event.payload))
-    const stopVisible = await listen('observer-visible', refresh)
+    const stopVisible = await listen('observer-visible', () => { window.dispatchEvent(new Event('observer-resumed')); refresh() })
     return () => { stopSnapshot(); stopVisible() }
   }
   const handler = (snapshot: Snapshot) => update(snapshot)

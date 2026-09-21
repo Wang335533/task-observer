@@ -81,6 +81,18 @@ class Store:
         with self.lock:
             return [json.loads(row[0]) for row in self.db.execute('SELECT config FROM tasks ORDER BY rowid')]
 
+    def next_generation(self):
+        with self.lock:
+            self.db.execute('BEGIN IMMEDIATE')
+            try:
+                value = int(self.setting('collector_generation') or 0) + 1
+                self.db.execute('INSERT OR REPLACE INTO settings VALUES(?,?)', ('collector_generation', json.dumps(value)))
+                self.db.commit()
+                return value
+            except BaseException:
+                self.db.rollback()
+                raise
+
     def save_task(self, task):
         with self.lock:
             self.db.execute('INSERT OR REPLACE INTO tasks VALUES(?,?)', (task['id'], json.dumps(task, ensure_ascii=False)))

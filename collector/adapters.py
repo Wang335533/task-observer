@@ -29,6 +29,7 @@ def normalize_tieba(raw):
         updated_at=timestamp(monitor.get('captured_at')), statistics_at=timestamp(monitor.get('captured_at')),
         started_at=timestamp(run.get('started')), finished_at=timestamp(run.get('finished')),
         writer_pid=monitor.get('writer_pid'), current=raw.get('current_thread') or '',
+        statistics_kind='快照时间',
         note='帖子、评论、用户为已导出研究文件行数；快照更新不代表每个文件都刚刚导出。',
     )
     queue = {}
@@ -63,7 +64,10 @@ def normalize_grok(raw):
     )
     for name, prefix in [('thread_queue', '会话'), ('user_queue', '用户')]:
         for key, label in [('done', '已完成'), ('pending', '待处理'), ('retry_wait', '等待重试'), ('dead_letter', '待核查')]:
-            result['queues'].append(metric(f'{name}_{key}', f'{prefix} · {label}', (raw.get(name) or {}).get(key)))
+            item = metric(f'{name}_{key}', f'{prefix} · {label}', (raw.get(name) or {}).get(key))
+            item.update(statistics_at=timestamp((raw.get('_grok_cache') or {}).get('times', {}).get(name)),
+                        cached=name in inspection.get('cached_fields', []))
+            result['queues'].append(item)
         dead = finite((raw.get(name) or {}).get('dead_letter'))
         if dead and dead > 0:
             result['issues'].append(dict(code=f'{name}_review', level='attention', message=f'{prefix}有 {dead:,} 项待核查'))
@@ -73,6 +77,8 @@ def normalize_grok(raw):
         result['last_error'] = redact(run['last_error'])
     if result['cached']:
         result['issues'].append(dict(code='cached', level='collector', message='部分统计沿用旧值，请查看更新时间'))
+    if '_grok_cache' in raw:
+        result['_grok_cache'] = raw['_grok_cache']
     return result
 
 
@@ -129,7 +135,27 @@ def collect(task):
     if task['adapter'] == 'json':
         return normalize_generic(read_json(task['snapshot']), task)
     from .grok_probe import collect_grok
-    return normalize_grok(collect_grok(task))
+    result = normalize_grok(collect_grok(task))
+    previous = task.get('_previous') or {}
+    same_run = result.get('run_id') and result.get('run_id') == previous.get('run_id')
+    old_source = (previous.get('_grok_cache') or {}).get('source')
+    new_source = (result.get('_grok_cache') or {}).get('source')
+    if old_source and new_source and old_source != new_source:
+        same_run = False
+    if same_run:
+        for group in ('metrics', 'queues'):
+            old = {m['key']: m for m in previous.get(group, [])}
+            for item in result[group]:
+                prior = old.get(item['key'], {})
+                if item['value'] is None and prior.get('value') is not None:
+                    item.update(value=prior['value'], cached=True,
+                                statistics_at=prior.get('statistics_at', previous.get('statistics_at')))
+                    result['cached'] = True
+        if any(m.get('cached') for m in result['metrics']):
+            result['statistics_at'] = min((m['statistics_at'] for m in result['metrics'] if m.get('statistics_at') is not None), default=None)
+        if result['cached'] and not any(i['code'] == 'cached' for i in result['issues']):
+            result['issues'].append(dict(code='cached', level='collector', message='部分统计沿用旧值，请查看更新时间'))
+    return result
 
 
 def read_log(task, limit=200):

@@ -6,6 +6,11 @@ use crate::{Bridge, bridge_request, start_collector};
 const HEALTH_SECONDS: u64 = 300;
 const MAX_ATTEMPTS: u32 = 3;
 
+fn is_healthy(value: &serde_json::Value) -> bool {
+    value["sample_age"].as_f64().is_some_and(|age| age <= 900.0)
+        && value["readers_overdue"].as_bool() == Some(false)
+}
+
 fn retry_delay(attempt: u32) -> Duration {
     Duration::from_secs(HEALTH_SECONDS * (1 << attempt.saturating_sub(1).min(2)))
 }
@@ -60,8 +65,7 @@ pub fn start(app: tauri::AppHandle, bridge: Arc<Bridge>) {
             if bridge.shutting_down.load(Ordering::SeqCst) { break; }
             if attempts >= MAX_ATTEMPTS { continue; }
             let health = bridge_request(&bridge, "ping", json!({})).await;
-            let healthy = health.as_ref().is_ok_and(|value|
-                value["sample_age"].as_f64().is_some_and(|age| age <= 900.0));
+            let healthy = health.as_ref().is_ok_and(is_healthy);
             if let Ok(value) = health {
                 bridge.notifications.store(value["notifications"].as_bool().unwrap_or(true), Ordering::SeqCst);
             }
@@ -90,7 +94,7 @@ pub fn start(app: tauri::AppHandle, bridge: Arc<Bridge>) {
                 timer.tick().await;
                 if bridge.shutting_down.load(Ordering::SeqCst) { break; }
                 let last = bridge_request(&bridge, "ping", json!({})).await;
-                if last.as_ref().is_ok_and(|v| v["sample_age"].as_f64().is_some_and(|age| age <= 900.0)) {
+                if last.as_ref().is_ok_and(is_healthy) {
                     attempts = 0;
                     record(&app, "healthy", attempts);
                     continue;
@@ -109,6 +113,12 @@ pub fn start(app: tauri::AppHandle, bridge: Arc<Bridge>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fresh_resources_do_not_hide_stuck_readers() {
+        assert!(is_healthy(&json!({"sample_age": 1, "readers_overdue": false})));
+        assert!(!is_healthy(&json!({"sample_age": 1, "readers_overdue": true})));
+        assert!(!is_healthy(&json!({"sample_age": 901, "readers_overdue": false})));
+    }
     #[test]
     fn retries_back_off_and_are_bounded() {
         assert_eq!(MAX_ATTEMPTS, 3);
