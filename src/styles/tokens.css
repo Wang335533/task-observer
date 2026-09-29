@@ -1,0 +1,162 @@
+/* Design tokens. Every colour in the UI comes from here so light and dark stay in step. */
+:root {
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", "Cascadia Code", Consolas, "Microsoft YaHei UI", monospace;
+
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --sidebar-w: 240px;
+  --topbar-h: 56px;
+  --gutter: 32px;
+  --ease: cubic-bezier(.2, .7, .2, 1);
+
+  color-scheme: light;
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --surface-2: #fafbfc;
+  --surface-3: #f1f3f6;
+  --surface-hover: #f6f7f9;
+  --border: #e5e8ec;
+  --border-soft: #eef0f3;
+  --border-strong: #d3d8de;
+  --text: #101828;
+  --text-2: #475467;
+  --text-3: #667085;
+  --text-4: #98a2b3;
+
+  --accent: #0f7c85;
+  --accent-hover: #0c6a72;
+  --accent-soft: #e7f4f4;
+  --accent-text: #0b6a72;
+  --accent-contrast: #ffffff;
+  --ring: rgb(15 124 133 / .32);
+
+  --ok: #0f7a52;       --ok-soft: #e8f6ef;      --ok-dot: #17b26a;
+  --info: #1f5fbf;     --info-soft: #ebf2fd;    --info-dot: #2e90fa;
+  --warn: #9a5a05;     --warn-soft: #fef5e6;    --warn-dot: #f79009;
+  --danger: #b42318;   --danger-soft: #fef0ee;  --danger-dot: #f04438;
+  --neutral: #475467;  --neutral-soft: #f2f4f7; --neutral-dot: #98a2b3;
+
+  --tint-teal: #0f7c85;   --tint-teal-bg: #e5f4f4;
+  --tint-indigo: #4c52d4; --tint-indigo-bg: #eef0fe;
+  --tint-violet: #7447cc; --tint-violet-bg: #f3effd;
+  --tint-amber: #93600b;  --tint-amber-bg: #fbf3e4;
+  --tint-blue: #2360c4;   --tint-blue-bg: #eaf2fd;
+  --tint-slate: #4f5f72;  --tint-slate-bg: #eef1f5;
+
+  --shadow-xs: 0 1px 2px rgb(16 24 40 / .04);
+  --shadow-sm: 0 1px 3px rgb(16 24 40 / .07), 0 1px 2px rgb(16 24 40 / .03);
+  --shadow-md: 0 10px 28px -8px rgb(16 24 40 / .12), 0 2px 6px -2px rgb(16 24 40 / .05);
+  --shadow-lg: 0 24px 64px -12px rgb(16 24 40 / .24);
+  --overlay: rgb(15 23 32 / .36);
+
+  --code-bg: #0f1620;
+  --code-text: #d3dbe4;
+  --code-muted: #56657a;
+  --code-border: #1d2733;
+  --code-warn: #f5b454;
+  --code-danger: #ff8a7d;
+
+  --chart-1: #0f9aa3;
+  --chart-2: #6366f1;
+  --chart-grid: #eceff3;
+  --chart-axis: #8a94a3;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0b0e12;
+    --surface: #12161c;
+    --surface-2: #151a21;
+    --surface-3: #1b2129;
+    --surface-hover: #181e26;
+    --border: #232a33;
+    --border-soft: #1d232b;
+    --border-strong: #313a46;
+    --text: #e8ecf1;
+    --text-2: #b0b9c5;
+    --text-3: #8c97a5;
+    --text-4: #5d6876;
+    --accent: #2ab0b7;
+    --accent-hover: #3cc3c9;
+    --accent-soft: rgb(42 176 183 / .14);
+    --accent-text: #5fd0d5;
+    --accent-contrast: #04282b;
+    --ring: rgb(60 195 201 / .4);
+    --ok: #4cd38f;      --ok-soft: rgb(76 211 143 / .12);    --ok-dot: #3ccf85;
+    --info: #80b4ff;    --info-soft: rgb(128 180 255 / .13); --info-dot: #5b9dff;
+    --warn: #f4b55a;    --warn-soft: rgb(244 181 90 / .13);  --warn-dot: #f5a524;
+    --danger: #ff8478;  --danger-soft: rgb(255 132 120 / .13); --danger-dot: #f5574a;
+    --neutral: #a8b2bf; --neutral-soft: rgb(168 178 191 / .12); --neutral-dot: #6b7684;
+    --tint-teal: #5fd0d5;   --tint-teal-bg: rgb(42 176 183 / .15);
+    --tint-indigo: #a2a6ff; --tint-indigo-bg: rgb(129 134 255 / .15);
+    --tint-violet: #c2a5ff; --tint-violet-bg: rgb(166 128 255 / .15);
+    --tint-amber: #f2c37a;  --tint-amber-bg: rgb(242 180 90 / .14);
+    --tint-blue: #8fbcff;   --tint-blue-bg: rgb(107 160 255 / .15);
+    --tint-slate: #b3bfcc;  --tint-slate-bg: rgb(160 175 190 / .13);
+    --shadow-xs: 0 1px 2px rgb(0 0 0 / .3);
+    --shadow-sm: 0 1px 3px rgb(0 0 0 / .4);
+    --shadow-md: 0 14px 32px -10px rgb(0 0 0 / .6), 0 0 0 1px rgb(255 255 255 / .02);
+    --shadow-lg: 0 28px 72px -12px rgb(0 0 0 / .75);
+    --overlay: rgb(0 0 0 / .56);
+    --code-bg: #090c10;
+    --code-text: #cfd7e0;
+    --code-muted: #4b5767;
+    --code-border: #1b222b;
+    --chart-1: #2ec4cb;
+    --chart-2: #8f90fa;
+    --chart-grid: #212831;
+    --chart-axis: #7a8594;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0b0e12;
+  --surface: #12161c;
+  --surface-2: #151a21;
+  --surface-3: #1b2129;
+  --surface-hover: #181e26;
+  --border: #232a33;
+  --border-soft: #1d232b;
+  --border-strong: #313a46;
+  --text: #e8ecf1;
+  --text-2: #b0b9c5;
+  --text-3: #8c97a5;
+  --text-4: #5d6876;
+  --accent: #2ab0b7;
+  --accent-hover: #3cc3c9;
+  --accent-soft: rgb(42 176 183 / .14);
+  --accent-text: #5fd0d5;
+  --accent-contrast: #04282b;
+  --ring: rgb(60 195 201 / .4);
+  --ok: #4cd38f;      --ok-soft: rgb(76 211 143 / .12);    --ok-dot: #3ccf85;
+  --info: #80b4ff;    --info-soft: rgb(128 180 255 / .13); --info-dot: #5b9dff;
+  --warn: #f4b55a;    --warn-soft: rgb(244 181 90 / .13);  --warn-dot: #f5a524;
+  --danger: #ff8478;  --danger-soft: rgb(255 132 120 / .13); --danger-dot: #f5574a;
+  --neutral: #a8b2bf; --neutral-soft: rgb(168 178 191 / .12); --neutral-dot: #6b7684;
+  --tint-teal: #5fd0d5;   --tint-teal-bg: rgb(42 176 183 / .15);
+  --tint-indigo: #a2a6ff; --tint-indigo-bg: rgb(129 134 255 / .15);
+  --tint-violet: #c2a5ff; --tint-violet-bg: rgb(166 128 255 / .15);
+  --tint-amber: #f2c37a;  --tint-amber-bg: rgb(242 180 90 / .14);
+  --tint-blue: #8fbcff;   --tint-blue-bg: rgb(107 160 255 / .15);
+  --tint-slate: #b3bfcc;  --tint-slate-bg: rgb(160 175 190 / .13);
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / .3);
+  --shadow-sm: 0 1px 3px rgb(0 0 0 / .4);
+  --shadow-md: 0 14px 32px -10px rgb(0 0 0 / .6), 0 0 0 1px rgb(255 255 255 / .02);
+  --shadow-lg: 0 28px 72px -12px rgb(0 0 0 / .75);
+  --overlay: rgb(0 0 0 / .56);
+  --code-bg: #090c10;
+  --code-text: #cfd7e0;
+  --code-muted: #4b5767;
+  --code-border: #1b222b;
+  --chart-1: #2ec4cb;
+  --chart-2: #8f90fa;
+  --chart-grid: #212831;
+  --chart-axis: #7a8594;
+}

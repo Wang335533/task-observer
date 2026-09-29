@@ -68,8 +68,9 @@ test('fresh installation has no invented tasks', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByRole('heading', { name: '任务总览' })).toBeVisible()
   await expect(page.locator('.task-card')).toHaveCount(0)
-  await expect(page.getByText('没有符合条件的任务')).toBeVisible()
+  await expect(page.getByText('还没有关注任务')).toBeVisible()
   await expect(page.getByRole('button', { name: '添加关注任务' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '添加第一个任务' })).toBeVisible()
 })
 
 test('all six adapters open independent pages and show check cadence', async ({ page }) => {

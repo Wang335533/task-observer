@@ -1,0 +1,35 @@
+/* Alerts */
+.alert-row { display: flex; align-items: flex-start; gap: 14px; padding: 16px 20px; border-bottom: 1px solid var(--border-soft); transition: background .12s; }
+.alert-row:last-child { border-bottom: 0; }
+.alert-row:hover { background: var(--surface-hover); }
+.alert-row.resolved { opacity: .72; }
+.alert-icon { width: 36px; height: 36px; flex-shrink: 0; display: grid; place-items: center; border-radius: 10px; background: var(--warn-soft); color: var(--warn); }
+.alert-icon.error { background: var(--danger-soft); color: var(--danger); }
+.alert-icon.collector { background: var(--info-soft); color: var(--info); }
+.alert-icon.resolved { background: var(--ok-soft); color: var(--ok); }
+.alert-body { flex: 1; min-width: 0; }
+.alert-task { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; font-size: 13.5px; font-weight: 600; color: var(--text); }
+.alert-task:hover { color: var(--accent-text); }
+.alert-body p { margin: 4px 0 6px; font-size: 13px; line-height: 1.7; color: var(--text-2); overflow-wrap: anywhere; }
+.alert-body small { display: flex; align-items: center; gap: 8px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.alert-state { padding: 1px 7px; border-radius: 8px; font-size: 11.5px; font-weight: 500; background: var(--neutral-soft); color: var(--neutral); }
+.alert-state.open { background: var(--warn-soft); color: var(--warn); }
+.alert-state.resolved { background: var(--ok-soft); color: var(--ok); }
+
+/* Settings */
+.settings { display: grid; gap: 20px; max-width: 920px; }
+.settings-panel { padding: 20px 24px 8px; }
+.settings-panel > h3 { padding-bottom: 12px; border-bottom: 1px solid var(--border-soft); }
+.settings-panel > .kv { padding: 6px 0 4px; }
+.settings-panel > .source-note { margin: 4px 0 16px; }
+.setting-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 16px 0; border-bottom: 1px solid var(--border-soft); }
+.setting-row:last-child { border-bottom: 0; }
+.setting-row strong { font-size: 13.5px; font-weight: 500; color: var(--text); }
+.setting-row p { margin-top: 3px; font-size: 12.5px; line-height: 1.6; color: var(--text-3); }
+.settings-panel .kv dt { width: 120px; }
+
+@media (max-width: 640px) {
+  .alert-row { flex-wrap: wrap; padding: 14px 16px; }
+  .alert-row > .button { margin-left: 50px; }
+  .setting-row { flex-direction: column; align-items: flex-start; gap: 12px; }
+}

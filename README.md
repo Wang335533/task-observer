@@ -8,7 +8,7 @@ Windows 本地业务任务监控应用。只关注用户登记的脚本或模块
 
 ## 使用
 
-面向 Windows 10/11 x64。每项关注任务一张卡片，点击进入独立详情页，提供进度、日志、资源趋势和运行历史；返回总览保留筛选和滚动位置。
+面向 Windows 10/11 x64。每项关注任务一张卡片（也可切换为列表视图），点击进入独立详情页，提供进度、日志、资源趋势和运行历史；返回总览保留筛选和滚动位置。侧边栏列出全部关注任务及其状态，可直接跳转。界面默认跟随 Windows 浅色 / 深色主题，也可在设置中固定。
 
 首次打开后点击“添加关注任务”，填写项目位置、脚本或模块入口与进度来源。已登记但没有运行的任务仍保留卡片。任务通过原来的方式启动，仪表盘只负责观察。
 
@@ -72,7 +72,7 @@ Windows 桌面通知遵守系统的通知设置及勿扰模式；应用内提醒
 
 ## 开发与构建
 
-源码目录：`src/` 为界面，`src-tauri/` 为桌面宿主，`collector/` 为 Python 采集器，`tests/` 为独立测试，`scripts/` 为构建工具。
+源码目录：`src/` 为界面（`pages/` 页面、`components/` 组件与布局、`lib/` 数据桥接与状态逻辑、`styles/` 设计令牌与样式），`src-tauri/` 为桌面宿主，`collector/` 为 Python 采集器，`tests/` 为独立测试，`scripts/` 为构建工具。
 
 依赖版本由 `package-lock.json`、`src-tauri/Cargo.lock` 和 `collector/requirements-build.txt` 锁定。需要 Node.js 22.12+、Python 3.11、PowerShell 7；桌面编译另外需要 Rust MSVC 工具链、Microsoft C++ Build Tools（C++ 桌面开发和 Windows SDK）及 WebView2。
 
