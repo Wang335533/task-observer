@@ -12,7 +12,8 @@ folder = root.parent / 'work' / ('packaged-smoke-' + str(int(time.time())))
 folder.mkdir(parents=True)
 snapshot = folder / 'progress.json'
 binary_name = 'task-observer-collector.exe' if os.name == 'nt' else 'task-observer-collector'
-process = subprocess.Popen([str(root / 'src-tauri/binaries' / binary_name), '--data-dir', str(folder / 'data'), '--no-seed'],
+binary = Path(os.environ.get('TASK_OBSERVER_COLLECTOR_BINARY', str(root / 'src-tauri/binaries' / binary_name)))
+process = subprocess.Popen([str(binary), '--data-dir', str(folder / 'data'), '--no-seed'],
     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8',
     creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
 responses = queue.Queue()

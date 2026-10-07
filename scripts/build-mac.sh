@@ -13,3 +13,4 @@ cp src-tauri/binaries/task-observer-collector src-tauri/binaries/task-observer-c
 npm ci --no-audit --no-fund
 npm run package -- --ci --target aarch64-apple-darwin
 .venv/bin/python3 scripts/package_macos.py
+TASK_OBSERVER_COLLECTOR_BINARY="$PWD/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/任务观测台.app/Contents/MacOS/task-observer-collector" .venv/bin/python3 scripts/smoke_collector.py
