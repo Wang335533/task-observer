@@ -12,3 +12,4 @@ python3 -m venv .venv
 cp src-tauri/binaries/task-observer-collector src-tauri/binaries/task-observer-collector-aarch64-apple-darwin
 npm ci --no-audit --no-fund
 npm run package -- --ci --target aarch64-apple-darwin
+.venv/bin/python3 scripts/package_macos.py
