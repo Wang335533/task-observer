@@ -6,6 +6,7 @@ __pycache__/
 .pytest_cache/
 src-tauri/target/
 src-tauri/binaries/*.exe
+src-tauri/binaries/task-observer-collector*
 build/
 test-results/
 playwright-report/

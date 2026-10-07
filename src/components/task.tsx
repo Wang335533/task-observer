@@ -3,7 +3,7 @@ import type { Task, TaskConfig } from '../lib/types'
 import { number, states } from '../lib/utils'
 import { runTone } from '../lib/task'
 
-const glyphs = { kokusho: BookOpen, ssrn: FileText, cnki: FileText, msqa: MessageSquare, tieba: MessageSquare, grok: Link2, json: Activity, process: Activity }
+const glyphs = { kokusho: BookOpen, ssrn: FileText, cnki: FileText, msqa: MessageSquare, tieba: MessageSquare, guba: MessageSquare, grok: Link2, json: Activity, process: Activity }
 
 export function TaskIcon({ adapter, size = 'md' }: { adapter: TaskConfig['adapter']; size?: 'sm' | 'md' | 'lg' }) {
   const Glyph = glyphs[adapter] || Activity

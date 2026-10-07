@@ -32,9 +32,10 @@ export function TaskForm({ initial, onClose, onSaved }: { initial?: TaskConfig; 
     <fieldset>
       <legend>进度与日志</legend>
       <label className="field"><span>进度来源</span><select aria-label="进度来源" value={task.adapter} onChange={e => field('adapter', e.target.value)}>{Object.entries(adapterLabels).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
-      {(['json', 'tieba', 'msqa', 'kokusho', 'cnki'].includes(task.adapter)) && <label className="field"><span>{task.adapter === 'kokusho' ? '原始数据目录（包含三类详情分片）' : task.adapter === 'cnki' ? '知网 SQLite 数据库（只读）' : 'JSON 状态文件'}</span><input required value={task.snapshot} onChange={e => field('snapshot', e.target.value)} placeholder="E:\我的项目\训练\progress.json" /></label>}
+      {(['json', 'tieba', 'guba', 'msqa', 'kokusho', 'cnki'].includes(task.adapter)) && <label className="field"><span>{task.adapter === 'kokusho' ? '原始数据目录（包含三类详情分片）' : task.adapter === 'cnki' ? '知网 SQLite 数据库（只读）' : 'JSON 状态文件'}</span><input required value={task.snapshot} onChange={e => field('snapshot', e.target.value)} placeholder="E:\我的项目\训练\progress.json" /></label>}
       {task.adapter === 'ssrn' && <label className="field"><span>本地助手端口</span><input type="number" min={1024} max={65535} value={task.helper_port ?? 18765} onChange={e => setTask(t => ({ ...t, helper_port: Number(e.target.value) }))} /><small>仅连接 127.0.0.1 的现有助手，不启动服务、不执行下载操作。</small></label>}
       {task.adapter === 'grok' && <p className="form-note"><Info size={15} /><span>自动读取项目的只读进度模块与配置，无需另行指定 Python；不会运行抓取命令。</span></p>}
+      {task.adapter === 'guba' && <p className="form-note"><Info size={15} /><span>选择正式输出目录的 progress.json；抓取命令需显式指定相同的 --output，避免把独立样本误认作正式运行。</span></p>}
       <label className="field"><span>日志文件或文件夹（可选）</span><input value={task.logs} onChange={e => field('logs', e.target.value)} placeholder="E:\我的项目\训练\logs" /></label>
     </fieldset>
     {error && <p role="alert" className="error-message">{error}</p>}<div className="form-actions"><Button type="button" variant="ghost" onClick={onClose}>取消</Button><Button disabled={saving}>{saving ? '保存中…' : '保存关注任务'}</Button></div>

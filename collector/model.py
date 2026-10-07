@@ -42,7 +42,7 @@ def validate_task(value):
         result[key] = result[key].strip()
     if not Path(result['project']).is_absolute():
         raise ValueError('项目位置必须是绝对路径')
-    if result.get('adapter') not in ('grok', 'tieba', 'json', 'process', 'msqa', 'kokusho', 'ssrn', 'cnki'):
+    if result.get('adapter') not in ('grok', 'tieba', 'guba', 'json', 'process', 'msqa', 'kokusho', 'ssrn', 'cnki'):
         raise ValueError('未知的进度来源')
     if result.get('match_kind') not in ('script', 'module'):
         raise ValueError('请选择脚本或模块识别方式')
@@ -55,7 +55,7 @@ def validate_task(value):
         result[key] = str(result.get(key, '')).strip()
         if result[key] and not Path(result[key]).is_absolute():
             raise ValueError(f'{key} 必须使用绝对路径')
-    if result['adapter'] in ('json', 'tieba', 'msqa', 'kokusho', 'cnki') and not result['snapshot']:
+    if result['adapter'] in ('json', 'tieba', 'guba', 'msqa', 'kokusho', 'cnki') and not result['snapshot']:
         raise ValueError('请指定进度文件或分片目录')
     commands = result.get('subcommands', [])
     if not isinstance(commands, list) or any(not isinstance(s, str) or not re.fullmatch(r'[\w-]+', s) for s in commands):

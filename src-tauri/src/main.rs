@@ -79,9 +79,16 @@ async fn bridge_request(bridge: &Arc<Bridge>, method: &str, params: Value) -> Re
 }
 
 fn collector_path() -> PathBuf {
-    let beside = std::env::current_exe().unwrap().parent().unwrap().join("task-observer-collector.exe");
+    let filename = if cfg!(windows) { "task-observer-collector.exe" } else { "task-observer-collector" };
+    let beside = std::env::current_exe().unwrap().parent().unwrap().join(filename);
     if beside.exists() { return beside; }
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries/task-observer-collector-x86_64-pc-windows-msvc.exe")
+    #[cfg(windows)]
+    let development = "binaries/task-observer-collector-x86_64-pc-windows-msvc.exe";
+    #[cfg(target_os = "macos")]
+    let development = "binaries/task-observer-collector-aarch64-apple-darwin";
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let development = "binaries/task-observer-collector";
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(development)
 }
 
 fn data_directory(app: &tauri::AppHandle) -> Result<PathBuf, Box<dyn std::error::Error>> {

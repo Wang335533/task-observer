@@ -6,7 +6,7 @@ import psutil
 
 
 def normalized(path):
-    return os.path.normcase(os.path.abspath(path)).casefold()
+    return os.path.normcase(os.path.abspath(path))
 
 
 def matches(task, proc):
@@ -28,7 +28,22 @@ def matches(task, proc):
         if not cwd or normalized(cwd) != normalized(task['project']):
             return False
         commands = task.get('subcommands') or []
-        return not commands or (pos + 2 < len(args) and args[pos + 2] in commands)
+        if commands and not (pos + 2 < len(args) and args[pos + 2] in commands):
+            return False
+        if task.get('adapter') == 'guba':
+            # Separate production from sample crawls in the same project. The
+            # watched output must be explicit: config files can override defaults.
+            output = None
+            for index, token in enumerate(args[pos + 2:], pos + 2):
+                if token == '--output' and index + 1 < len(args):
+                    output = args[index + 1]
+                elif token.startswith('--output='):
+                    output = token.partition('=')[2]
+            if not output or not task.get('snapshot'):
+                return False
+            output_path = output if Path(output).is_absolute() else str(Path(cwd) / output)
+            return normalized(output_path) == normalized(Path(task['snapshot']).parent)
+        return True
     # Interpreter flags can have arguments; only accept a real existing script token,
     # and never classify -c / -m / -e evaluation sessions as script launches.
     if any(flag in args[1:] for flag in ('-c', '-m', '-e', '--eval')):

@@ -1,6 +1,6 @@
 export type Metric = { key: string; label: string; value: number | null; unit: string; statistics_at?: number | null; cached?: boolean }
 export type TaskConfig = {
-  id: string; name: string; description: string; adapter: 'grok' | 'tieba' | 'json' | 'process' | 'msqa' | 'kokusho' | 'ssrn' | 'cnki';
+  id: string; name: string; description: string; adapter: 'grok' | 'tieba' | 'guba' | 'json' | 'process' | 'msqa' | 'kokusho' | 'ssrn' | 'cnki';
   project: string; match_kind: 'module' | 'script'; entry: string; subcommands: string[];
   snapshot: string; logs: string; python: string; interval: number; helper_port?: number;
 }

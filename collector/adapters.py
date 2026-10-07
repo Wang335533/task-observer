@@ -4,7 +4,7 @@ import json
 import time
 from pathlib import Path
 
-from .model import finite, redact, timestamp
+from .model import REFRESH_SECONDS, STALE_SECONDS, finite, redact, timestamp
 
 
 def metric(key, label, value, unit=''):
@@ -48,6 +48,10 @@ def normalize_tieba(raw):
 
 def normalize_grok(raw):
     result = base_snapshot()
+    export_interval = finite((raw.get('runtime_config') or {}).get('export_interval_seconds'))
+    if export_interval is not None and export_interval > 0:
+        # 业务数量只在完整导出后更新，留两个监控周期用于导出及下一次读取。
+        result['statistics_max_age_seconds'] = max(STALE_SECONDS, export_interval + 2 * REFRESH_SECONDS)
     datasets, run, inspection = raw.get('datasets') or {}, raw.get('run') or {}, raw.get('inspection') or {}
     result.update(
         metrics=[metric(key, label, (datasets.get(key) or {}).get('actual')) for key, label in
@@ -121,6 +125,9 @@ def read_json(path):
 
 
 def collect(task):
+    if task['adapter'] == 'guba':
+        from .guba import normalize_guba
+        return normalize_guba(read_json(task['snapshot']))
     if task['adapter'] in ('msqa', 'kokusho', 'ssrn', 'cnki'):
         from .sources import normalize_msqa, collect_kokusho, collect_ssrn, collect_cnki
         if task['adapter'] == 'msqa':

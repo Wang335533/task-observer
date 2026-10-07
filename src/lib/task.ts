@@ -3,7 +3,7 @@ import type { Task, TaskConfig } from './types'
 export const checkStates: Record<string, string> = { checking: '正在检查', success: '检查完成', timeout: '检查超时', error: '检查异常', waiting: '等待首次检查' }
 
 export const adapterLabels: Record<TaskConfig['adapter'], string> = {
-  json: '通用 JSON 状态文件', process: '仅监控进程', tieba: '贴吧快照', grok: 'Grok 进度模块', msqa: 'Microsoft Q&A 快照',
+  json: '通用 JSON 状态文件', process: '仅监控进程', tieba: '贴吧快照', guba: '股吧抓取快照', grok: 'Grok 进度模块', msqa: 'Microsoft Q&A 快照',
   kokusho: '国书数据库分片', ssrn: 'SSRN PDF 本地助手', cnki: '知网期刊进度（只读）',
 }
 

@@ -87,6 +87,7 @@ def collect_grok(task):
     # Keep only fields the dashboard displays. Never persist account/config secrets.
     fields = {}
     allowed = {'run': ('run_id', 'status', 'started_at', 'finished_at', 'heartbeat_at'),
+               'runtime_config': ('export_interval_seconds',),
                'scope': ('phase',), 'recent_window': ('time_segment',),
                'thread_queue': ('done', 'pending', 'retry_wait', 'dead_letter'),
                'user_queue': ('done', 'pending', 'retry_wait', 'dead_letter')}

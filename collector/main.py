@@ -16,7 +16,9 @@ from collector.model import redact
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data-dir', default=os.environ.get('TASK_OBSERVER_DATA_DIR', str(Path(os.environ.get('LOCALAPPDATA', '.')) / 'TaskObserver')))
+    default_directory = (Path.home() / 'Library/Application Support/local.taskobserver.desktop'
+                         if sys.platform == 'darwin' else Path(os.environ.get('LOCALAPPDATA', '.')) / 'TaskObserver')
+    parser.add_argument('--data-dir', default=os.environ.get('TASK_OBSERVER_DATA_DIR', str(default_directory)))
     parser.add_argument('--no-seed', action='store_true')
     parser.add_argument('--probe', action='store_true')
     args = parser.parse_args()

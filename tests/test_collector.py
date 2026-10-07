@@ -17,6 +17,31 @@ def module_task():
     return dict(id='grok', name='Grok', project='E:/research/grok', match_kind='module', entry='grokspider', subcommands=['catchup'], adapter='grok')
 
 
+def test_grok_hourly_statistics_deadline_preserves_heartbeat_monitoring():
+    now = 10000
+    raw = dict(checked_at=now, run={'status':'running', 'heartbeat_at':now},
+               inspection={'statistics_at':now - 1800},
+               runtime_config={'export_interval_seconds':3600})
+    snapshot = adapters.normalize_grok(raw)
+    resource = {'roots':[{'pid':1, 'created_at':1}]}
+    assert snapshot['statistics_at'] == now - 1800
+    assert snapshot['statistics_max_age_seconds'] == 4200
+    state = view_state(snapshot, resource, None, now, 'grok')
+    assert state['health'] == 'ok'
+    late = snapshot | {'statistics_at':now - 4201}
+    assert 'statistics_stale' in {i['code'] for i in view_state(late, resource, None, now, 'grok')['issues']}
+    old_heartbeat = snapshot | {'heartbeat_at':now - 901}
+    assert 'heartbeat' in {i['code'] for i in view_state(old_heartbeat, resource, None, now, 'grok')['issues']}
+    # 其他采集器仍使用原15分钟阈值，不能被Grok的导出设置放宽。
+    assert 'statistics_stale' in {i['code'] for i in view_state(snapshot, resource, None, now, 'tieba')['issues']}
+
+
+@pytest.mark.parametrize('interval', [None, 0, -1, True, '3600', float('nan'), float('inf')])
+def test_grok_invalid_export_interval_keeps_default_deadline(interval):
+    snapshot = adapters.normalize_grok({'runtime_config':{'export_interval_seconds':interval}})
+    assert 'statistics_max_age_seconds' not in snapshot
+
+
 def proc(args, cwd='E:/research/grok', pid=10, parent=1, created=100):
     return dict(pid=pid, ppid=parent, create_time=created, name='python.exe', cmdline=['python.exe', *args], cwd=cwd)
 

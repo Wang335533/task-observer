@@ -11,7 +11,7 @@ from pathlib import Path
 import psutil
 
 from . import adapters
-from .model import REFRESH_SECONDS, STALE_SECONDS, redact, validate_task
+from .model import REFRESH_SECONDS, STALE_SECONDS, finite, redact, validate_task
 from .processes import ProcessSampler
 from .store import Store
 from .readers import ReadPool
@@ -65,8 +65,14 @@ def view_state(snapshot, resource, adapter_error, now, adapter):
     elif running and stale and updated is not None and adapter != 'process':
         issues.append(dict(code='stale', level='collector', message='进度快照超过 15 分钟未更新'))
     statistics = snapshot.get('statistics_at')
-    if running and source_current and statistics is not None and now - statistics > STALE_SECONDS:
-        issues.append(dict(code='statistics_stale', level='collector', message='业务统计超过 15 分钟未更新，检查成功不代表统计已更新'))
+    statistics_limit = STALE_SECONDS
+    if adapter == 'grok':
+        configured_limit = finite(snapshot.get('statistics_max_age_seconds'))
+        if configured_limit is not None:
+            statistics_limit = max(STALE_SECONDS, configured_limit)
+    if running and source_current and statistics is not None and now - statistics > statistics_limit:
+        issues.append(dict(code='statistics_stale', level='collector',
+                           message=f'业务统计超过 {statistics_limit / 60:g} 分钟未更新，检查成功不代表统计已更新'))
     if running and source_current and snapshot.get('heartbeat_at') and now - snapshot['heartbeat_at'] > STALE_SECONDS:
         issues.append(dict(code='heartbeat', level='attention', message='进程仍在运行，但任务心跳已超过 15 分钟未更新'))
     status = snapshot.get('status', 'unknown') if source_current else 'running'
